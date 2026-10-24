@@ -8,7 +8,7 @@ TV用セットアップAPK、Windows用セットアップツール、x86/x64のB
 
 ## ダウンロードと手順
 
-- [セットアップ一式 ZIP](dist/TCLTV-Bondriver-v0.2.0.zip)
+- [セットアップ一式 ZIP](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.2.0/TCLTV-Bondriver-v0.2.0.zip)
 - **[スクショ付きセットアップ手順](docs/SETUP.md)**
 - [ビルド方法](docs/BUILD.md)
 - [構成とプロトコル](docs/ARCHITECTURE.md)
