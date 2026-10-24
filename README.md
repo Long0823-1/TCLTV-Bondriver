@@ -4,11 +4,11 @@ TCL G06日本向けAndroid TVの地デジを、WindowsのBonDriver対応ソフ�
 
 TV用セットアップAPK、Windows用セットアップツール、x86/x64のBonDriverを用意しています。初回設定後の選局・TS転送はTV内の常駐ネイティブサービスが行い、PC側のPythonやADB常駐は不要です。
 
-**v0.2.1 / 実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
+**v0.3.0 / 実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
 
 ## ダウンロードと手順
 
-- [セットアップ一式 ZIP](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.2.1/TCLTV-Bondriver-v0.2.1.zip)
+- [セットアップ一式 ZIP](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.3.0/TCLTV-Bondriver-v0.3.0.zip)
 - **[スクショ付きセットアップ手順](docs/SETUP.md)**
 - [ビルド方法](docs/BUILD.md)
 - [構成とプロトコル](docs/ARCHITECTURE.md)
@@ -22,7 +22,7 @@ ZIPはすべて展開して使用してください。TVTestとADBは同梱し�
 - Magisk導入済みのTVと、そのTVで地デジを受信できる環境。
 - Windows 10/11、x86またはx64のBonDriver対応ソフト。TVTest.exeのビット数に合うDLLをツールが選びます。
 - TVとPC間の有線LANまたはWi-Fi。初回のAPK導入・接続設定にはUSBまたはネットワークADBが必要です。
-- 現在のBonDriverの局一覧は東京・関東の検証用プリセットです。周波数はTVのチャンネルDBから取得します。TV側のチャンネル設定を先に済ませてください。
+- 地デジの局一覧はTV本体のスキャン結果から取得します。地域固定のプリセットは使いません。TV側でスキャン後、Windowsツールで接続設定・局一覧を更新してください。周波数はTVのチャンネルDBから取得します。
 
 APKはroot化・ブートローダー変更・ファームウェアの書き換えを行いません。対応するベンダーライブラリー3個のSHA-256を検査し、不一致ならセットアップを中止します。検査値は `android/assets/install.sh` に記載しています。
 
@@ -49,3 +49,7 @@ TVを再起動すると保存済みの選局・配信を復旧します。TV画�
 機器固有の接続キーはTVのroot専用ファイルと、PC側のINIに保存します。セットアップツールはINIとそのバックアップを現在のWindowsユーザーおよびSYSTEMだけが読めるように設定します。実際のINI、接続キー、署名秘密鍵、放送TS、ベンダーライブラリーはリポジトリに含めません。
 
 開発：Long0823-1。自作部分は [MIT License](LICENSE)。TVTestなど外部ソフトはそれぞれのライセンスに従って入手してください。
+
+## v0.3.0への更新
+
+TVTestを閉じて新しいAPKでセットアップし、TVを再起動します。Windowsツールの「2. 接続設定・局一覧を更新」を実行し、TVTestのチャンネルスキャンをやり直してください。旧版のINIだけでは新しいDLLに局が表示されません。

@@ -23,3 +23,13 @@ nativeビルドはAPKへ入れるlibtsd.soとtsctlも生成します。BonDriver
 このオプションは全エントリーのCRC・長さ・リソースを検査し、オフセットを保ったままZIP終端を補います。通常のコンパイルエラーは無視せず、最後にAPKの署名検証を行います。配布APKは署名検証済みです。
 
 開発用テストハーネスは `bondriver/test_background.cpp`、PSI解析の試験は `native/tests` に配置しています。実機は対応するファームウェアのハッシュ検査を通る機器でのみ確認してください。
+
+## チャンネル一覧の検証
+
+```powershell
+./windows/tests/run.ps1
+./bondriver/build.ps1 -Architecture x64
+./bondriver/build.ps1 -Architecture x86
+```
+
+ビルドしたtest_channels.exeにDLLパス・期待件数・先頭の局名を渡すと、OpenTuner前の日本語列挙と範囲チェックを検証できる。TV Providerから取得したデータをテストする場合、windows/tests/run.ps1の-TvRows/-RealIni/-FixtureIniを指定する。実機データや接続キー入りINIはコミットしない。

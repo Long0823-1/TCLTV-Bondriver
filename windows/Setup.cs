@@ -28,7 +28,7 @@ namespace TclBonDriverSetup {
    var intro=new Label {Text="TV用APKを導入し、PCの視聴ソフトへBonDriverを配置します。",AutoSize=true,Margin=new Padding(0,10,0,15)};panel.Controls.Add(intro,0,1);panel.SetColumnSpan(intro,3);
    AddField(panel,2,"ADB接続先",adbSerial,"");AddField(panel,3,"TVの接続先IP",host,"");detect.Text="IP取得";detect.Dock=DockStyle.Fill;panel.Controls.Add(detect,2,3);AddField(panel,4,"TVTestのフォルダー",destination,"");browse.Text="選択…";browse.Dock=DockStyle.Fill;panel.Controls.Add(browse,2,4);
    browse.Click+=(s,e)=>{using(var d=new FolderBrowserDialog()) {d.Description="TVTest.exeがあるフォルダー";if(d.ShowDialog(this)==DialogResult.OK)destination.Text=d.SelectedPath;}};
-   install.Text="1. APKをTVへ導入";pair.Text="2. 接続設定とDLLを配置";test.Text="3. 配信をテスト";
+   install.Text="1. APKをTVへ導入";pair.Text="2. 接続設定・局一覧を更新";test.Text="3. 配信をテスト";
    var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill,Margin=new Padding(0,18,0,10)};foreach(var b in new[]{install,pair,test}) {b.AutoSize=true;b.MinimumSize=new Size(195,38);buttons.Controls.Add(b);}dual.Text="2チューナー分のBonDriverを配置する";dual.Checked=true;dual.AutoSize=true;panel.Controls.Add(dual,0,5);panel.SetColumnSpan(dual,3);
    autoIp.Text="TVのIPを自動取得";autoIp.Checked=true;autoIp.AutoSize=true;buttons.Controls.Add(autoIp);networkMode.DropDownStyle=ComboBoxStyle.DropDownList;networkMode.Items.AddRange(new object[]{"自動（有線LAN優先）","有線LAN","Wi-Fi"});networkMode.SelectedIndex=0;networkMode.Width=180;buttons.Controls.Add(networkMode);panel.Controls.Add(buttons,0,6);panel.SetColumnSpan(buttons,3);
    var hint=new Label {AutoSize=true,Text="初回：TVのAPKでrootを許可し、セットアップ後に再起動してください。\nUSB接続の場合、ADB接続先を空欄にすると接続中の1台を自動選択します。"};panel.Controls.Add(hint,0,7);panel.SetColumnSpan(hint,3);
@@ -80,14 +80,18 @@ namespace TclBonDriverSetup {
   void Pair() {
    string folder=ReadText(destination);if(folder.Length==0||!Directory.Exists(folder))throw new IOException("TVTestのフォルダーを選択してください。");string tvtest=Path.Combine(folder,"TVTest.exe");if(!File.Exists(tvtest))throw new IOException("選択先にTVTest.exeがありません。");bool x64=Is64BitPe(tvtest);string source=Path.Combine(root,x64?"x64":"x86","BonDriver_TCLG06.dll");if(!File.Exists(source))throw new FileNotFoundException("配布ZIPに対応するDLLがありません。");
    string serial=Device(),server=Server(serial);Note("TVの接続設定を取得しています…");string token=Adb("-s "+Q(serial)+" shell su -c 'cat /data/local/tmp/tsd_token'",20).Trim();if(!Regex.IsMatch(token,@"\A[0-9a-fA-F]{64}\z"))throw new IOException("接続キーを取得できません。TVのセットアップと、ADBへのroot許可を確認してください。");string status=Control(server,token,"STATUS");if(!status.StartsWith("OK "))throw new IOException("TVとの認証に失敗しました。");
+   Note("TV本体のスキャン結果から地デジの局一覧を取得しています…");
+   string rows=Adb("-s "+Q(serial)+" shell su -c 'content query --uri content://android.media.tv/channel --projection display_number:original_network_id:transport_stream_id:service_id:type:service_type:browsable:display_name'",30);
+   var channels=ChannelCatalog.Parse(rows);string catalog=ChannelCatalog.Ini(channels);
+   Note("地デジ "+channels.Count+"サービスを取得しました（TVで非表示の局・BS/CS・データ専用サービスは対象外）。");
    int count=UseDual()?2:1;if(count==2&&!Regex.IsMatch(status,@"(?:^| )tuners=2(?: |$)"))throw new IOException("TV側の2チューナー対応サービスを確認できません。APKを更新してセットアップ・再起動してください。");
    for(int index=0;index<count;index++) {
     string name=index==0?"BonDriver_TCLG06":"BonDriver_TCLG06_1";
-    string ini=Path.Combine(folder,name+".ini"),dll=Path.Combine(folder,name+".dll");Backup(dll);Backup(ini);File.Copy(source,dll,true);
-    File.WriteAllText(ini,"[Server]\r\nHost="+server+"\r\nPort="+(index==0?40556:40558)+"\r\n\r\n[Control]\r\nMode=Native\r\nPort=40557\r\nTunerIndex="+index+"\r\nToken="+token+"\r\n",new UTF8Encoding(false));PrivateFile(ini);
+    string ini=Path.Combine(folder,name+".ini"),dll=Path.Combine(folder,name+".dll"),ch2=Path.Combine(folder,name+".ch2");bool changed=!File.Exists(ini)||!File.ReadAllText(ini).EndsWith(catalog,StringComparison.Ordinal);Backup(dll);Backup(ini);if(changed)Backup(ch2);File.Copy(source,dll,true);
+    File.WriteAllText(ini,"[Server]\r\nHost="+server+"\r\nPort="+(index==0?40556:40558)+"\r\n\r\n[Control]\r\nMode=Native\r\nPort=40557\r\nTunerIndex="+index+"\r\nToken="+token+"\r\n"+catalog,Encoding.Unicode);PrivateFile(ini);if(changed&&File.Exists(ch2)){File.Delete(ch2);Note(name+"：古いTVTest局設定をバックアップしました。チャンネルスキャンをやり直してください。");}
    }
    Note((x64?"64":"32")+"bit版を"+count+"系統分配置しました。");
-   Note(count==2?"TVTestを2つ起動し、BonDriver_TCLG06 と BonDriver_TCLG06_1 をそれぞれ選んでください。":"TVTestでBonDriver_TCLG06を選んでください。");Note("接続認証に成功しました。");
+   Note(count==2?"TVTestを2つ起動し、BonDriver_TCLG06 と BonDriver_TCLG06_1 をそれぞれ選んでください。":"TVTestでBonDriver_TCLG06を選んでください。");Note("接続認証に成功しました。TVTestでチャンネルスキャンを行ってください。");
   }
   static TcpClient Connect(string host,int port) {var client=new TcpClient();var pending=client.BeginConnect(host,port,null,null);using(pending.AsyncWaitHandle) {if(!pending.AsyncWaitHandle.WaitOne(5000)) {client.Close();throw new IOException("TVへの接続が時間切れになりました。");}client.EndConnect(pending);}client.ReceiveTimeout=3000;client.SendTimeout=3000;return client;}
   static string Control(string host,string token,string command) {using(var client=Connect(host,40557)) {client.ReceiveTimeout=command.StartsWith("TUNE ")?45000:3000;var stream=client.GetStream();byte[] bytes=Encoding.ASCII.GetBytes("AUTH "+token+" "+command+"\n");stream.Write(bytes,0,bytes.Length);using(var reader=new StreamReader(stream,Encoding.ASCII,false,1024)) {string line=reader.ReadLine();if(line==null||line.Length>1024)throw new IOException("TVからの応答を確認できません。");return line;}}}
@@ -106,7 +110,7 @@ namespace TclBonDriverSetup {
     Match m=Regex.Match(File.ReadAllText(ini),@"(?m)^Token=([0-9a-fA-F]{64})\s*$");if(!m.Success)throw new IOException("接続設定を再作成してください。");
     string status=Control(server,m.Groups[1].Value,"STATUS");if(!status.StartsWith("OK "))throw new IOException("TVとの認証に失敗しました。");
     if(!Regex.IsMatch(status,@"(?:^| )tuner1_running=1(?: |$)")) {
-     Note("2系統目を日本テレビへ初期選局しています…");string tuned=Control(server,m.Groups[1].Value,"TUNE 1 32738 32738 1040");
+     var first=ChannelCatalog.FirstFromIni(File.ReadAllText(ini));Note("2系統目をTVの局一覧の先頭へ初期選局しています…");string tuned=Control(server,m.Groups[1].Value,"TUNE 1 "+first.Command);
      if(!tuned.StartsWith("OK "))throw new IOException("2系統目を選局できません。TV側のチャンネル設定を確認してください。");
     }
    }

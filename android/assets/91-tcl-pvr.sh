@@ -1,5 +1,17 @@
 #!/system/bin/sh
 # Magisk late-start service. Restore the native tuner without opening a TV app.
+# Select only a visible terrestrial AV service from this TV's scan results.
+first_scanned_tuple() {
+ content query --uri content://android.media.tv/channel --projection original_network_id:transport_stream_id:service_id:type:service_type:browsable 2>/dev/null |
+ grep -E 'type=TYPE_ISDB_T, service_type=(EN_TCL_DTV|SERVICE_TYPE_AUDIO_VIDEO), browsable=1$' |
+ sed -n 's/^Row: [0-9][0-9]* original_network_id=\([0-9][0-9]*\), transport_stream_id=\([0-9][0-9]*\), service_id=\([0-9][0-9]*\),.*$/\1 \2 \3/p' |
+ while read -r onid tsid sid; do
+  [ "$onid" -ge 1 ] && [ "$onid" -le 65535 ] && [ "$tsid" -ge 1 ] && [ "$tsid" -le 65535 ] && [ "$sid" -ge 1 ] && [ "$sid" -le 65535 ] || continue
+  printf '%02x%02x%02x%02x%02x%02x\n' "$((sid & 255))" "$((sid >> 8))" "$((tsid & 255))" "$((tsid >> 8))" "$((onid & 255))" "$((onid >> 8))"
+  break
+ done
+}
+if [ "$1" = '--channel-only' ];then first_scanned_tuple;exit;fi
 CTL=/data/local/tmp/tsctl
 LOG=/data/local/tmp/tcl-pvr-boot.log
 exec >>"$LOG" 2>&1
@@ -27,9 +39,8 @@ done
 if "$CTL" pvrstatus | grep -q 'running=1';then
  echo 'PVR already running; preserving current channel.';exit 0
 fi
-# Native channel DB remains available even when Android TV Provider has no rows.
-# Validate before selecting. The fallback is used only when present in this DB.
-tuple=0004e07fe07f
+# Restore the saved channel, otherwise use this TV's scan results.
+tuple=
 pids=0000
 if [ -r /data/local/tmp/tsd_last_channel ];then
  saved_tuple=$(sed -n '1p' /data/local/tmp/tsd_last_channel)
@@ -39,12 +50,20 @@ if [ -r /data/local/tmp/tsd_last_channel ];then
  [ "${#saved_tuple}" -eq 12 ] && tuple=$saved_tuple
  if [ -n "$saved_pids" ] && [ "${#saved_pids}" -le 252 ];then pids=$saved_pids;fi
 fi
-"$CTL" "pokek 3 0 $tuple"
-valid=$("$CTL" 'call db_dtv_get_prog_info_by_triplet @4 @3')
-case "$valid" in
- 'ret=0x1 (1)') "$CTL" 'call tvhdtv_play_program_by_triplet @3';;
- *) echo 'No saved native channel is available; tune a channel once before enabling automatic startup.';exit 2;;
-esac
+valid=
+if [ "${#tuple}" -eq 12 ];then
+ "$CTL" "pokek 3 0 $tuple" >/dev/null
+ valid=$("$CTL" 'call db_dtv_get_prog_info_by_triplet @4 @3')
+fi
+if [ "$valid" != 'ret=0x1 (1)' ];then
+ tuple=$(first_scanned_tuple)
+ [ "${#tuple}" -eq 12 ] || { echo 'No visible terrestrial channel: scan channels on the TV first.';exit 2; }
+ pids=0000
+ "$CTL" "pokek 3 0 $tuple" >/dev/null
+ valid=$("$CTL" 'call db_dtv_get_prog_info_by_triplet @4 @3')
+fi
+[ "$valid" = 'ret=0x1 (1)' ] || { echo 'The scanned channel is not in the native DB; rescan on the TV.';exit 2; }
+"$CTL" 'call tvhdtv_play_program_by_triplet @3'
 count=0
 while :;do
  "$CTL" 'call fpi_demod_get_lock_status 0 @6' >/dev/null

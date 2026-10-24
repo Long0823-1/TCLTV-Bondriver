@@ -15,15 +15,7 @@
 static HMODULE g_module;
 static constexpr DWORD Chunk = 188 * 256;
 static constexpr size_t MaxBlocks = (32 * 1024 * 1024) / Chunk;
-struct Channel { const wchar_t *name; DWORD tsid, service; };
-static const Channel Channels[] = {
- {L"NHK General Tokyo",32736,1024}, {L"NHK ETV Tokyo",32737,1032},
- {L"NTV",32738,1040}, {L"TV Asahi",32741,1064}, {L"TBS",32739,1048},
- {L"TV Tokyo",32742,1072}, {L"Fuji TV",32740,1056},
- {L"TOKYO MX1",32391,23608}, {L"TOKYO MX2",32391,23610},
- {L"J:COM TV",32397,23656}, {L"J:COM Channel",32399,23672},
- {L"Chiba TV",32327,27704}, {L"TV Saitama",32295,29752}
-};
+struct Channel { std::wstring name; DWORD onid, tsid, service; };
 
 class Driver final : public IBonDriver2 {
  std::atomic<SOCKET> sock{INVALID_SOCKET};
@@ -38,6 +30,7 @@ class Driver final : public IBonDriver2 {
  bool helperMode = false;
  char token[128] = {};
  std::wstring ini, script, python, adbSerial;
+ std::vector<Channel> channels;
  std::deque<std::vector<BYTE>> queue;
  std::vector<BYTE> output;
  static unsigned __stdcall Receive(void *p) { static_cast<Driver *>(p)->ReceiveLoop(); return 0; }
@@ -47,8 +40,9 @@ class Driver final : public IBonDriver2 {
  bool Tune(DWORD index);
  bool TuneWithHelper(DWORD index);
  void LoadSettings();
+ void LoadChannels();
 public:
- Driver() { InitializeCriticalSection(&cs); dataEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr); output.reserve(Chunk); }
+ Driver() { InitializeCriticalSection(&cs); dataEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr); output.reserve(Chunk); LoadSettings(); LoadChannels(); }
  ~Driver() { CloseTuner(); if(dataEvent)CloseHandle(dataEvent); DeleteCriticalSection(&cs); }
  const BOOL OpenTuner() override;
  void CloseTuner() override;
@@ -63,7 +57,7 @@ public:
  LPCWSTR GetTunerName() override { return tunerIndex==1?L"TCL G06 ISDB-T #2":L"TCL G06 ISDB-T #1"; }
  const BOOL IsTunerOpening() override { return opened ? TRUE : FALSE; }
  LPCWSTR EnumTuningSpace(DWORD space) override { return space==0 ? L"Terrestrial ISDB-T" : nullptr; }
- LPCWSTR EnumChannelName(DWORD space,DWORD channel) override { return space==0 && channel<_countof(Channels) ? Channels[channel].name : nullptr; }
+ LPCWSTR EnumChannelName(DWORD space,DWORD channel) override { return space==0 && channel<channels.size() ? channels[channel].name.c_str() : nullptr; }
  const BOOL SetChannel(DWORD space,DWORD channel) override;
  const DWORD GetCurSpace() override { return current==0xffffffff ? 0xffffffff : 0; }
  const DWORD GetCurChannel() override { return current; }
@@ -91,9 +85,26 @@ void Driver::LoadSettings() {
  if(!(script.size()>1 && script[1]==L':') && script.rfind(L"\\\\",0)!=0) script=ini.substr(0,ini.find_last_of(L"\\/")+1)+script;
  GetPrivateProfileStringW(L"Control",L"AdbSerial",L"192.168.0.160:5555",value,_countof(value),ini.c_str()); adbSerial=value;
 }
+static bool ChannelNumber(const std::wstring &ini,const wchar_t *section,const wchar_t *key,DWORD &result) {
+ wchar_t value[16];DWORD n=GetPrivateProfileStringW(section,key,L"",value,_countof(value),ini.c_str());
+ if(!n||n>=_countof(value)-1||wcsspn(value,L"0123456789")!=n)return false;
+ unsigned long parsed=wcstoul(value,nullptr,10);if(!parsed||parsed>65535)return false;result=(DWORD)parsed;return true;
+}
+void Driver::LoadChannels() {
+ UINT count=GetPrivateProfileIntW(L"Channels",L"Count",0,ini.c_str());if(!count||count>512)return;
+ std::vector<Channel> loaded;loaded.reserve(count);
+ for(UINT i=0;i<count;i++) {
+  wchar_t section[32],name[512];swprintf_s(section,L"Channel%u",i);Channel channel{};
+  DWORD length=GetPrivateProfileStringW(section,L"Name",L"",name,_countof(name),ini.c_str());
+  if(!length||length>=_countof(name)-1||!ChannelNumber(ini,section,L"ONID",channel.onid)||!ChannelNumber(ini,section,L"TSID",channel.tsid)||!ChannelNumber(ini,section,L"ServiceID",channel.service))return;
+  for(const auto &previous:loaded)if(previous.onid==channel.onid&&previous.tsid==channel.tsid&&previous.service==channel.service)return;
+  channel.name=name;loaded.push_back(std::move(channel));
+ }
+ channels.swap(loaded);
+}
 const BOOL Driver::OpenTuner() {
  if(opened) return TRUE;
- if(!dataEvent) return FALSE;
+ if(!dataEvent || channels.empty()) return FALSE;
  LoadSettings();
  if(tunerIndex<0||tunerIndex>1)return FALSE;
  wchar_t lockName[320], lockHost[256];
@@ -236,7 +247,8 @@ void Driver::PurgeTsStream() {
  EnterCriticalSection(&cs); queue.clear(); ResetEvent(dataEvent); LeaveCriticalSection(&cs);
 }
 bool Driver::TuneWithHelper(DWORD index) {
- const Channel &channel=Channels[index];
+ const Channel &channel=channels[index];
+ if(channel.onid!=channel.tsid)return false;
  wchar_t numbers[128]; swprintf_s(numbers,L" --triplet %lu --service %lu",channel.tsid,channel.service);
  std::wstring command=L"\""+python+L"\" \""+script+L"\" --host ";
  wchar_t widehost[256]; MultiByteToWideChar(CP_UTF8,0,host,-1,widehost,_countof(widehost));
@@ -273,9 +285,9 @@ bool Driver::Tune(DWORD index) {
  if(control==INVALID_SOCKET)return false;
  DWORD timeout=45000; setsockopt(control,SOL_SOCKET,SO_RCVTIMEO,(char *)&timeout,sizeof(timeout));
  timeout=5000; setsockopt(control,SOL_SOCKET,SO_SNDTIMEO,(char *)&timeout,sizeof(timeout));
- const Channel &channel=Channels[index];
+ const Channel &channel=channels[index];
  char command[256];
- int length=sprintf_s(command,"AUTH %s TUNE %d %lu %lu %lu\n",token,tunerIndex,channel.tsid,channel.tsid,channel.service);
+ int length=sprintf_s(command,"AUTH %s TUNE %d %lu %lu %lu\n",token,tunerIndex,channel.onid,channel.tsid,channel.service);
  int offset=0;
  while(offset<length) { int n=send(control,command+offset,length-offset,0);if(n<=0)break;offset+=n; }
  char response[1024]={};int used=0;
@@ -289,7 +301,7 @@ bool Driver::Tune(DWORD index) {
  return used>=3 && response[used-1]=='\n' && strncmp(response,"OK ",3)==0;
 }
 const BOOL Driver::SetChannel(DWORD space,DWORD channel) {
- if(!opened || space!=0 || channel>=_countof(Channels)) return FALSE;
+ if(!opened || space!=0 || channel>=channels.size()) return FALSE;
  if(current==channel && connected) return TRUE;
  Disconnect(); PurgeTsStream();
  if(!Tune(channel)) { current=0xffffffff; Connect(); return FALSE; }
