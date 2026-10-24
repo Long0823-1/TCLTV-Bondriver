@@ -1,0 +1,1 @@
+OK protocol=2 tuners=2 running=1 tsid=32737 service=1032 bytes=18715156352 sent=24752832 error=0 tuner1_running=1 tuner1_tsid=32738 tuner1_service=1040 tuner1_bytes=18841056192 tuner1_sent=25208356 tuner1_error=0 tuner1_ready=1 tuner1_frequency=545143 tuner1_ecm_errors=0 tuner1_sync_errors=0 tuner1_cc_errors=0 tuner1_tei=0

@@ -1,0 +1,15 @@
+{
+  "secondary": {
+    "bytes": 108178260,
+    "sync_errors": 0,
+    "cc_errors": 0,
+    "tei": 0,
+    "video": 484906,
+    "video_scrambled": 0,
+    "audio": 6981,
+    "audio_scrambled": 0,
+    "pat_tsids": [
+      32738
+    ]
+  }
+}

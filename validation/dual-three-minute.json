@@ -1,0 +1,28 @@
+{
+  "primary": {
+    "bytes": 341361332,
+    "sync_errors": 0,
+    "cc_errors": 0,
+    "tei": 0,
+    "video": 1533617,
+    "video_scrambled": 0,
+    "audio": 28290,
+    "audio_scrambled": 0,
+    "pat_tsids": [
+      32737
+    ]
+  },
+  "secondary": {
+    "bytes": 327535668,
+    "sync_errors": 0,
+    "cc_errors": 0,
+    "tei": 0,
+    "video": 1688814,
+    "video_scrambled": 0,
+    "audio": 31949,
+    "audio_scrambled": 0,
+    "pat_tsids": [
+      32738
+    ]
+  }
+}

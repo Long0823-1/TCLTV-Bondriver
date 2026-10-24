@@ -1,0 +1,45 @@
+{
+  "duplicate_tuner_exit": 4,
+  "drivers": [
+    {
+      "tuner": 0,
+      "architecture": "x64",
+      "exit": 0,
+      "harness": "bytes=24545280 reads=510 bad_sync=0 timeouts=0 channel=1",
+      "packets": {
+        "bytes": 24545280,
+        "sync_errors": 0,
+        "cc_errors": 0,
+        "tei": 0,
+        "video": 110323,
+        "audio": 1687,
+        "video_scrambled": 0,
+        "audio_scrambled": 0,
+        "pat_crc_errors": 0,
+        "pat_tsids": [
+          32737
+        ]
+      }
+    },
+    {
+      "tuner": 1,
+      "architecture": "x86",
+      "exit": 0,
+      "harness": "bytes=25122816 reads=522 bad_sync=0 timeouts=0 channel=2",
+      "packets": {
+        "bytes": 25122816,
+        "sync_errors": 0,
+        "cc_errors": 0,
+        "tei": 0,
+        "video": 112896,
+        "audio": 2132,
+        "video_scrambled": 0,
+        "audio_scrambled": 0,
+        "pat_crc_errors": 0,
+        "pat_tsids": [
+          32738
+        ]
+      }
+    }
+  ]
+}

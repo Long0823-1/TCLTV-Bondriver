@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.long0823.tclbondriver" android:versionCode="2" android:versionName="0.2.0">
+ <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="32"/>
+ <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-feature android:name="android.software.leanback" android:required="false"/>
+ <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+ <application android:label="TCL BonDriver セットアップ" android:theme="@android:style/Theme.Material.NoActionBar" android:icon="@drawable/icon" android:banner="@drawable/banner" android:allowBackup="false" android:supportsRtl="true">
+  <activity android:name=".MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+ </application>
+</manifest>

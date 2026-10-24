@@ -1,0 +1,8 @@
+[Server]
+Host=169.254.95.200
+Port=40556
+
+[Control]
+Mode=Native
+Port=40557
+Token=REPLACE_WITH_YOUR_DEVICE_TOKEN
