@@ -12,7 +12,9 @@ import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
- private TextView status,details;
+ private TextView status,details,network;
+ private final android.os.Handler networkHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+ private final Runnable networkRefresh=new Runnable(){public void run(){updateNetwork();networkHandler.postDelayed(this,5000);}};
  private ProgressBar progress;
  private Button setup,start,reboot,refresh,restore;
  private File stage;
@@ -24,6 +26,7 @@ public final class MainActivity extends Activity {
   LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(48),dp(28),dp(48),dp(28));root.setBackgroundColor(Color.rgb(15,26,34));scroll.addView(root);setContentView(scroll);
   TextView title=text("TCL BonDriver",28,Color.WHITE);root.addView(title);
   root.addView(text("テレビで別のアプリを使いながら、PCで異なる地デジ2局を同時受信",16,Color.rgb(180,197,208)));
+  network=text("有線LAN IP：確認中…",22,Color.rgb(125,218,190));network.setTextIsSelectable(true);network.setPadding(0,dp(16),0,0);root.addView(network);
   status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress);
   setup=button(root,"1. セットアップ",()->perform("対応環境を確認し、セットアップしています…",()->{
@@ -42,6 +45,21 @@ public final class MainActivity extends Activity {
   restore=button(root,"セットアップ前の状態に戻す",()->new AlertDialog.Builder(this).setTitle("元の状態に戻しますか？").setMessage("保存済みの設定を復元します。反映にはテレビの再起動が必要です。").setNegativeButton("戻る",null).setPositiveButton("復元",(d,w)->perform("設定を復元しています…",()->{extract();return root("sh "+quote(new File(stage,"restore.sh").getAbsolutePath()),60);})).show());
   setup.requestFocus();
  }
+ private void updateNetwork() {
+  StringBuilder wired=new StringBuilder(),wifi=new StringBuilder();
+  try {
+   java.util.Enumeration<java.net.NetworkInterface> interfaces=java.net.NetworkInterface.getNetworkInterfaces();
+   while(interfaces!=null&&interfaces.hasMoreElements()) {
+    java.net.NetworkInterface iface=interfaces.nextElement();String name=iface.getName();boolean ethernet=name.matches("eth[0-9]+")||name.matches("en[A-Za-z0-9_.-]+");boolean wireless=name.matches("wlan[0-9]+")||name.matches("wl[A-Za-z0-9_.-]+");
+    if(!iface.isUp()||iface.isLoopback()||(!ethernet&&!wireless))continue;
+    StringBuilder target=ethernet?wired:wifi;java.util.Enumeration<java.net.InetAddress> addresses=iface.getInetAddresses();
+    while(addresses.hasMoreElements()) {java.net.InetAddress address=addresses.nextElement();if(address instanceof java.net.Inet4Address&&!address.isLoopbackAddress()) {if(target.length()>0)target.append(" / ");target.append(address.getHostAddress());}}
+   }
+   network.setText("有線LAN IP："+(wired.length()==0?"未接続・IPv4未取得":wired.toString())+"\nWi-Fi IP："+(wifi.length()==0?"未接続・IPv4未取得":wifi.toString())+"\nPCの接続先IP（セットアップツールで自動取得できます）");
+  }catch(Exception error) {network.setText("IPを取得できません。TVのネットワーク設定を確認してください。");}
+ }
+ @Override protected void onResume() {super.onResume();networkHandler.removeCallbacks(networkRefresh);networkHandler.post(networkRefresh);}
+ @Override protected void onPause() {networkHandler.removeCallbacks(networkRefresh);super.onPause();}
  private TextView text(String value,int size,int color) { TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v; }
  private Button button(LinearLayout parent,String label,Runnable click) {
   Button button=new Button(this);button.setText(label);button.setTextSize(16);button.setAllCaps(false);button.setFocusable(true);button.setMinHeight(dp(52));button.setOnClickListener(v->click.run());

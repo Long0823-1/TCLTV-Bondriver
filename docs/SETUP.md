@@ -4,15 +4,15 @@
 
 - 対応するMagisk導入済みTCL G06。TV側で地デジのチャンネル設定を済ませます。
 - TVTestなどBonDriver対応ソフトを配置したWindows PC。
-- TVとPCを接続する有線LAN。
+- TVとPCを接続する有線LANまたはWi-Fi。
 - 初回設定用のADB。[Google公式Platform-Tools](https://developer.android.com/tools/releases/platform-tools)を入手し、`platform-tools` フォルダーをセットアップEXEの隣へ置くか、既存のADBをPATHに登録します。
 
 ## 1. ZIPを展開してWindowsツールを開く
 
-`TCLTV-Bondriver-v0.2.0.zip` をすべて展開し、`TCL-BonDriver-Setup.exe` を起動します。
+`TCLTV-Bondriver-v0.2.1.zip` をすべて展開し、`TCL-BonDriver-Setup.exe` を起動します。
 
 - **ADB接続先**：ネットワークADBなら `TVのIP:5555`。USB接続で接続機器が1台だけなら空欄で選択できます。
-- **TS配信先IP**：TVの有線LAN側のIPv4アドレス。
+- **TVの接続先IP**：通常は空欄のままで構いません。「TVのIPを自動取得」は初期状態でオンです。接続方式は「自動（有線LAN優先）／有線LAN／Wi-Fi」から選択します。USBのADB接続からもTVのIPを取得できます。
 - **TVTestのフォルダー**：`TVTest.exe` があるフォルダー。
 - **2チューナー分のBonDriverを配置する**：2局を同時受信する場合はオンにします。
 
@@ -97,3 +97,16 @@ ADB用のWi-Fiアドレスと、TS配信用の有線アドレスは別でも構�
 
 TVのAPKで **「セットアップ前の状態に戻す」** を実行し、TVを再起動します。最初のセットアップ前に保存した起動設定を復元します。開発用の設定が先にあった場合は、その時点の設定へ戻ります。PC側は保存した `.before-setup-日時` のバックアップを使って戻せます。
 
+
+## 有線LAN・Wi-FiのIP自動設定（v0.2.1）
+
+TV用APKは有線LANとWi-FiのIPv4を画面上部に表示し、5秒ごとに更新します。未接続の方式は「未接続・IPv4未取得」と表示します。
+
+Windowsツールで「TVのIPを自動取得」をオンにすると、「接続設定とDLLを配置」を押す際にTVのIPをADB経由で取得し、2系統のBonDriverのHostへ設定します。「IP取得」ボタンでも確認できます。自動モードは有線LANを優先し、両方にIPがある場合はPCから配信サービスに接続できる方を選びます。「有線LAN」「Wi-Fi」で明示的に選択することもできます。
+
+初回のADB接続は必要です。USBならADB接続先を空欄にでき、ネットワークADBなら初回だけTV画面に表示されたIP:5555を入力します。ネットワーク全体のTV探索や、TV・PCへの固定IP割り当ては行いません。
+
+IPが変わった場合は、視聴ソフトを閉じて「接続設定とDLLを配置」をもう一度実行してください。起動中のBonDriverのHostは自動変更しません。手動入力する場合は自動取得をオフにします。
+
+![有線LAN・Wi-Fi IP表示](images/tv-network-ip.png)
+![Windows IP自動取得](images/windows-network-ip.png)
