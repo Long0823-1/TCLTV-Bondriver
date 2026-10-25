@@ -4,11 +4,15 @@ TCL G06日本向けAndroid TVの地デジを、WindowsのBonDriver対応ソフ�
 
 TV用セットアップAPK、Windows用セットアップツール、x86/x64のBonDriverを用意しています。初回設定後の選局・TS転送はTV内の常駐ネイティブサービスが行い、PC側のPythonやADB常駐は不要です。
 
-**v0.4.1 / 実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
+**配信本体・Windows一式 v0.4.1 / TVセットアップAPK v0.4.2（スマホ連携追加）。実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
 
+Androidスマートフォン向けには、独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を用意しています。番組表とアプリ内再生に対応し、TVセットアップAPK 0.4.2では確認コードで接続情報・スキャン済み局一覧をスマホへ渡せます。
 ## ダウンロードと手順
 
-- [セットアップ一式 ZIP](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.4.1/TCLTV-Bondriver-v0.4.1.zip)
+- [Windows・初回TVセットアップ一式 ZIP（v0.4.1）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.4.1/TCLTV-Bondriver-v0.4.1.zip)
+- [TVセットアップAPK 0.4.2（モバイル連携）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/tag/v0.4.2)
+- [Androidスマホ用APK 0.2.0](https://github.com/Long0823-1/TCLTV-Android-Viewer/releases/tag/v0.2.0)
+- [スマホの接続手順](docs/mobile-pairing.md)
 - **[スクショ付きセットアップ手順](docs/SETUP.md)**
 - [ビルド方法](docs/BUILD.md)
 - [構成とプロトコル](docs/ARCHITECTURE.md)
