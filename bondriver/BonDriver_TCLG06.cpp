@@ -19,7 +19,9 @@ struct Channel { std::wstring name; DWORD onid, tsid, service; };
 
 class Driver final : public IBonDriver2 {
  std::atomic<SOCKET> sock{INVALID_SOCKET};
- HANDLE thread = nullptr, dataEvent = nullptr, tunerMutex = nullptr;
+ HANDLE thread = nullptr, dataEvent = nullptr, tunerMutex = nullptr, signalThread=nullptr, signalStop=nullptr;
+ std::atomic<SOCKET> signalSocket{INVALID_SOCKET};
+ std::atomic<float> signalLevel{0.0f};
  CRITICAL_SECTION cs;
  std::atomic<bool> stop{false}, connected{false};
  std::atomic<bool> opened{false};
@@ -35,6 +37,9 @@ class Driver final : public IBonDriver2 {
  std::vector<BYTE> output;
  static unsigned __stdcall Receive(void *p) { static_cast<Driver *>(p)->ReceiveLoop(); return 0; }
  void ReceiveLoop();
+ static unsigned __stdcall SignalWorker(void *p){static_cast<Driver *>(p)->SignalLoop();return 0;}
+ void SignalLoop();
+ void StopSignal();
  bool Connect();
  void Disconnect();
  bool Tune(DWORD index);
@@ -42,12 +47,12 @@ class Driver final : public IBonDriver2 {
  void LoadSettings();
  void LoadChannels();
 public:
- Driver() { InitializeCriticalSection(&cs); dataEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr); output.reserve(Chunk); LoadSettings(); LoadChannels(); }
- ~Driver() { CloseTuner(); if(dataEvent)CloseHandle(dataEvent); DeleteCriticalSection(&cs); }
+ Driver() { InitializeCriticalSection(&cs); dataEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr); signalStop=CreateEventW(nullptr,TRUE,FALSE,nullptr); output.reserve(Chunk); LoadSettings(); LoadChannels(); }
+ ~Driver() { CloseTuner(); if(dataEvent)CloseHandle(dataEvent); if(signalStop)CloseHandle(signalStop); DeleteCriticalSection(&cs); }
  const BOOL OpenTuner() override;
  void CloseTuner() override;
  const BOOL SetChannel(BYTE channel) override { return SetChannel(0,channel); }
- const float GetSignalLevel() override { return 0.0f; } // No fabricated RF measurement.
+ const float GetSignalLevel() override { return opened&&connected?signalLevel.load():0.0f; }
  const DWORD WaitTsStream(DWORD timeout) override;
  const DWORD GetReadyCount() override;
  const BOOL GetTsStream(BYTE *,DWORD *,DWORD *) override;
@@ -104,7 +109,7 @@ void Driver::LoadChannels() {
 }
 const BOOL Driver::OpenTuner() {
  if(opened) return TRUE;
- if(!dataEvent || channels.empty()) return FALSE;
+ if(!dataEvent || !signalStop || channels.empty()) return FALSE;
  LoadSettings();
  if(tunerIndex<0||tunerIndex>1)return FALSE;
  wchar_t lockName[320], lockHost[256];
@@ -119,9 +124,10 @@ const BOOL Driver::OpenTuner() {
  // Opening also permits attaching to the already running background channel.
  if(!Connect()) { WSACleanup(); winsock=false; CloseHandle(tunerMutex); tunerMutex=nullptr; return FALSE; }
  opened=true;
+ ResetEvent(signalStop);signalThread=(HANDLE)_beginthreadex(nullptr,0,SignalWorker,this,0,nullptr);
  return TRUE;
 }
-static SOCKET OpenSocket(const char *host,int port) {
+static SOCKET OpenSocket(const char *host,int port,int milliseconds=5000) {
  if(port<1 || port>65535) return INVALID_SOCKET;
  SOCKET candidate=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
  if(candidate==INVALID_SOCKET) return INVALID_SOCKET;
@@ -132,7 +138,7 @@ static SOCKET OpenSocket(const char *host,int port) {
  if(r!=0 && WSAGetLastError()!=WSAEWOULDBLOCK) { closesocket(candidate); return INVALID_SOCKET; }
  if(r!=0) {
   fd_set writes,errors; FD_ZERO(&writes); FD_ZERO(&errors); FD_SET(candidate,&writes); FD_SET(candidate,&errors);
-  timeval timeout{5,0};
+  timeval timeout{milliseconds/1000,(milliseconds%1000)*1000};
   int error=0,len=sizeof(error);
   if(select(0,nullptr,&writes,&errors,&timeout)<=0 || FD_ISSET(candidate,&errors) ||
     getsockopt(candidate,SOL_SOCKET,SO_ERROR,(char *)&error,&len)!=0 || error) { closesocket(candidate); return INVALID_SOCKET; }
@@ -140,6 +146,29 @@ static SOCKET OpenSocket(const char *host,int port) {
  mode=0; ioctlsocket(candidate,FIONBIO,&mode);
  DWORD timeout=1000; setsockopt(candidate,SOL_SOCKET,SO_RCVTIMEO,(char *)&timeout,sizeof(timeout));
  return candidate;
+}
+void Driver::StopSignal() {
+ if(signalStop)SetEvent(signalStop);
+ SOCKET active=signalSocket.exchange(INVALID_SOCKET);if(active!=INVALID_SOCKET){shutdown(active,SD_BOTH);closesocket(active);}
+ if(signalThread){WaitForSingleObject(signalThread,INFINITE);CloseHandle(signalThread);signalThread=nullptr;}
+ signalLevel=0.0f;
+}
+void Driver::SignalLoop() {
+ if(strlen(token)!=64 || strspn(token,"0123456789abcdefABCDEF")!=64)return;
+ while(WaitForSingleObject(signalStop,0)==WAIT_TIMEOUT) {
+  float level=0.0f;SOCKET control=OpenSocket(host,controlPort,1000);
+  if(control!=INVALID_SOCKET) {
+   signalSocket=control;DWORD timeout=1000;setsockopt(control,SOL_SOCKET,SO_RCVTIMEO,(char *)&timeout,sizeof timeout);setsockopt(control,SOL_SOCKET,SO_SNDTIMEO,(char *)&timeout,sizeof timeout);
+   char command[128],response[256]={};int length=sprintf_s(command,"AUTH %s SIGNAL %d\n",token,tunerIndex),sent=0,used=0;
+   while(sent<length){int n=send(control,command+sent,length-sent,0);if(n<=0)break;sent+=n;}
+   if(sent==length)while(used<(int)sizeof(response)-1){int n=recv(control,response+used,1,0);if(n<=0)break;if(response[used++]=='\n')break;}
+   int index=-1,locked=0,valid=0;unsigned cn=0,strength=0,quality=0;
+   if(used&&response[used-1]=='\n'&&sscanf_s(response,"OK tuner=%d locked=%d cn_valid=%d cn_mdb=%u strength=%u quality=%u",&index,&locked,&valid,&cn,&strength,&quality)==6&&index==tunerIndex&&locked==1&&valid==1&&cn<=100000&&strength<=100&&quality<=100)level=(float)cn/1000.0f;
+   SOCKET closeSocket=signalSocket.exchange(INVALID_SOCKET);if(closeSocket!=INVALID_SOCKET)closesocket(closeSocket);
+  }
+  signalLevel=level;if(WaitForSingleObject(signalStop,1000)!=WAIT_TIMEOUT)break;
+ }
+ signalLevel=0.0f;
 }
 bool Driver::Connect() {
  SOCKET candidate=OpenSocket(host,port);
@@ -159,7 +188,7 @@ void Driver::Disconnect() {
 }
 
 void Driver::CloseTuner() {
- Disconnect(); opened=false; current=0xffffffff;
+ StopSignal();Disconnect(); opened=false; current=0xffffffff;
  PurgeTsStream();
  if(winsock) { WSACleanup(); winsock=false; }
  if(tunerMutex) { CloseHandle(tunerMutex); tunerMutex=nullptr; }

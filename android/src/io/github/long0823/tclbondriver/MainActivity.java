@@ -33,7 +33,7 @@ public final class MainActivity extends Activity {
    extract();String output=root("sh "+quote(new File(stage,"install.sh").getAbsolutePath())+" "+quote(stage.getAbsolutePath()),90);
    return "セットアップが完了しました。テレビを再起動すると有効になります。\n"+output;
   }));
-  reboot=button(root,"2. テレビを再起動",()->new AlertDialog.Builder(this).setTitle("テレビを再起動します").setMessage("再起動後、配信機能を自動的に開始します。").setNegativeButton("戻る",null).setPositiveButton("再起動",(d,w)->perform("テレビを再起動しています…",()->root("reboot",15))).show());
+  reboot=button(root,"2. テレビを再起動",()->new AlertDialog.Builder(this).setTitle("テレビを再起動します").setMessage("再起動後、配信機能を自動的に開始します。").setNegativeButton("戻る",null).setPositiveButton("再起動",(d,w)->perform("テレビを再起動しています…",()->root("sync; reboot",15))).show());
   start=button(root,"配信を開始・復旧",()->perform("配信機能を確認しています…",()->root("sh /data/adb/service.d/91-tcl-pvr.sh; /data/local/tmp/tsctl --status",90)));
   refresh=button(root,"状態を確認",()->perform("状態を確認しています…",()->{
    String output=root("/data/local/tmp/tsctl --status; ip -4 addr show eth0",15);

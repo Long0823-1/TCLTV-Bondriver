@@ -61,4 +61,5 @@ mv "$TMP/91-tcl-pvr.sh.new" "$TMP/91-tcl-pvr.sh"
 cp "$STAGE/91-tcl-pvr.sh" /data/adb/service.d/91-tcl-pvr.sh.new
 chmod 755 /data/adb/service.d/91-tcl-pvr.sh.new
 mv /data/adb/service.d/91-tcl-pvr.sh.new /data/adb/service.d/91-tcl-pvr.sh
+sync
 echo 'セットアップ完了。再起動すると有効になります。'

@@ -22,9 +22,10 @@ int wmain(int argc,wchar_t **argv) {
  if(channel>=0 && !driver->SetChannel(0,(DWORD)channel)) { printf("SetChannel failed\n"); driver->Release(); FreeLibrary(module); return 6; }
  FILE *out=nullptr; _wfopen_s(&out,filename,L"wb");
  if(!out) return 7;
- unsigned long long total=0; DWORD bad=0,reads=0,timeouts=0;
+ unsigned long long total=0; DWORD bad=0,reads=0,timeouts=0; float maxSignal=0.0f;
  ULONGLONG start=GetTickCount64(); BYTE copy[48128];
  while(GetTickCount64()-start<(ULONGLONG)seconds*1000) {
+  float signal=driver->GetSignalLevel();if(signal>maxSignal)maxSignal=signal;
   DWORD wait=driver->WaitTsStream(2000);
   if(wait!=WAIT_OBJECT_0) { ++timeouts; if(wait!=WAIT_TIMEOUT) break; continue; }
   BYTE *data=nullptr; DWORD size=0,remaining=0; BOOL ok;
@@ -36,6 +37,7 @@ int wmain(int argc,wchar_t **argv) {
  }
  fclose(out);
  printf("bytes=%llu reads=%lu bad_sync=%lu timeouts=%lu channel=%lu\n",total,reads,bad,timeouts,driver->GetCurChannel());
+ printf("signal_db=%.3f\n",maxSignal);
  driver->CloseTuner();
  bool closed=!driver->IsTunerOpening() && driver->WaitTsStream(1)==WAIT_ABANDONED;
  driver->Release(); FreeLibrary(module);

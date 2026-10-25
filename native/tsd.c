@@ -32,8 +32,8 @@ int g_tsr_patch_tsio = 1;
 int g_pvrstream_port;
 static pthread_mutex_t g_pvr_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_pvrstream_started;
-static unsigned long long g_pvr_bytes, g_pvr_sent, g_pvr_clients;
-static int g_pvr_error;
+
+
 
 
 static void out(int fd, const char *fmt, ...) {
@@ -113,92 +113,9 @@ static uintptr_t parse_arg(const char *t) {
 }
 
 #include "tsd_dual.inc"
-#include "tsd_control.inc"
 
-// Background TS stream server for the mif_tsi_pvr_* PVR-engine path (進捗29):
-// continuously drains the 8MB PVR ring buffer via
-// get_readable_data()/confirm_data() and forwards the raw 188B-aligned bytes
-// to one TCP client, instead of blindly polling a fixed address like
-// stream_thread() does for the older SecFlt-based captures. Must keep up
-// with confirm_data or the ring buffer fills and PVR delivery stalls.
-static void *pvrstream_thread(void *arg) {
-  (void)arg;
-  typedef int (*getreadable_t)(uint32_t *, uint32_t *);
-  typedef int (*confirm_t)(uint32_t, uint32_t);
-  getreadable_t getreadable = (getreadable_t)resolve("mif_tsi_pvr_get_readable_data");
-  confirm_t confirm = (confirm_t)resolve("mif_tsi_pvr_confirm_data");
-  int listener = -1, client = -1, one = 1;
-  unsigned char *copy = malloc(0x800000);
-  if (!getreadable || !confirm || !copy) goto fail;
-  listener = socket(AF_INET, SOCK_STREAM, 0);
-  if (listener < 0) goto fail;
-  setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-  struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(g_pvrstream_port), .sin_addr.s_addr = htonl(INADDR_ANY)};
-  if (bind(listener, (void *)&sa, sizeof sa) || listen(listener, 2)) goto fail;
-  fcntl(listener, F_SETFL, fcntl(listener, F_GETFL, 0) | O_NONBLOCK);
-  LOG("pvrstream: listening on %d; draining while idle", g_pvrstream_port);
-  for (;;) {
-    if (client < 0) {
-      client = accept(listener, NULL, NULL);
-      if (client >= 0) {
-        struct timeval timeout = {.tv_sec = 0, .tv_usec = 250000};
-        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
-        pthread_mutex_lock(&g_pvr_lock);
-        ++g_pvr_clients;
-        pthread_mutex_unlock(&g_pvr_lock);
-      }
-    } else {
-      struct pollfd pfd = {.fd = client, .events = POLLIN};
-      if (poll(&pfd, 1, 0) > 0) {
-        char probe;
-        if ((pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) ||
-            ((pfd.revents & POLLIN) && recv(client, &probe, 1, MSG_PEEK | MSG_DONTWAIT) <= 0)) {
-          close(client); client = -1;
-        }
-      }
-    }
-    uint32_t addr = 0, len = 0;
-    pthread_mutex_lock(&g_pvr_lock);
-    int result = getreadable(&addr, &len);
-    uint32_t generation = g_pvr_generation;
-    if (result == 0 && addr && len && len <= 0x800000) {
-      memcpy(copy, (void *)(uintptr_t)addr, len);
-      result = confirm(addr, len);
-      if (result == 0) g_pvr_bytes += len;
-    } else {
-      if (len > 0x800000) result = -1;
-      len = 0;
-    }
-    g_pvr_error = result;
-    pthread_mutex_unlock(&g_pvr_lock);
-    if (result || !len) { usleep(10000); continue; }
-    control_feed(copy, len, generation);
-    if (client < 0) continue;
-    struct timespec send_started; clock_gettime(CLOCK_MONOTONIC, &send_started);
-    uint32_t off = 0;
-    while (off < len) {
-      struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
-      if ((now.tv_sec-send_started.tv_sec)*1000+(now.tv_nsec-send_started.tv_nsec)/1000000 > 1000) { close(client); client=-1; break; }
-      uint32_t chunk = len - off;
-      if (chunk > 65536) chunk = 65536;
-      ssize_t sent = send(client, copy + off, chunk, MSG_NOSIGNAL);
-      if (sent < 0 && errno == EINTR) continue;
-      if (sent <= 0) { close(client); client = -1; break; }
-      off += (uint32_t)sent;
-    }
-    pthread_mutex_lock(&g_pvr_lock);
-    g_pvr_sent += off;
-    pthread_mutex_unlock(&g_pvr_lock);
-  }
-fail:
-  LOG("pvrstream: startup failed errno=%d", errno);
-  if (listener >= 0) close(listener);
-  free(copy);
-  pthread_mutex_lock(&g_pvr_lock);
-  g_pvrstream_started = 0;
-  pthread_mutex_unlock(&g_pvr_lock);
-  return NULL;
-}
+#include "tsd_signal.inc"
+#include "tsd_control.inc"
 
 static void handle(int fd, char *line) {
   char *tok[16];
@@ -313,37 +230,10 @@ static void handle(int fd, char *line) {
   } else if (!strcmp(tok[0], "pvrstatus")) {
     pthread_mutex_lock(&g_pvr_lock);
     out(fd, "running=%d port=%d bytes=%llu sent=%llu clients=%llu error=%d\n",
-        g_pvrstream_started, g_pvrstream_port, g_pvr_bytes, g_pvr_sent, g_pvr_clients, g_pvr_error);
+        d0_dual_state.running, 40556, (unsigned long long)d0_dual_state.bytes, (unsigned long long)d0_dual_state.sent, (unsigned long long)d0_dual_clients, d0_dual_state.error);
     pthread_mutex_unlock(&g_pvr_lock);
-  } else if (!strcmp(tok[0], "pvrset") && n == 2) {
-    size_t hexlen = strlen(tok[1]);
-    uint16_t pids[63];
-    if (!hexlen || hexlen % 4 || hexlen / 4 > 63 || strspn(tok[1], "0123456789abcdefABCDEF") != hexlen) {
-      out(fd, "error invalid PID hex array\n"); return;
-    }
-    for (size_t i = 0; i < hexlen / 4; ++i) {
-      char lo[3] = {tok[1][i*4],tok[1][i*4+1],0};
-      char hi[3] = {tok[1][i*4+2],tok[1][i*4+3],0};
-      pids[i] = (uint16_t)(strtoul(lo,NULL,16) | (strtoul(hi,NULL,16)<<8));
-      if (pids[i] > 0x1fff) { out(fd, "error invalid PID\n"); return; }
-    }
-    int r = pvr_configure(pids, hexlen / 4, NULL);
-    out(fd, "ret=0x%x (%d) pids=%u\n", r, r, (unsigned)(hexlen / 4));
-  } else if (!strcmp(tok[0], "pvrstream") && n >= 2) {
-    int port = atoi(tok[1]);
-    if (port < 1024 || port > 65535) { out(fd, "error invalid port\n"); return; }
-    pthread_mutex_lock(&g_pvr_lock);
-    if (g_pvrstream_started) {
-      out(fd, "ok already streaming port=%d\n", g_pvrstream_port);
-    } else {
-      g_pvrstream_port = port;
-      g_pvrstream_started = 1;
-      pthread_t t;
-      int r = pthread_create(&t, NULL, pvrstream_thread, NULL);
-      if (r) { g_pvrstream_started = 0; out(fd, "error thread=%d\n",r); }
-      else { pthread_detach(t); out(fd, "ok pvrstreaming port=%d\n", port); }
-    }
-    pthread_mutex_unlock(&g_pvr_lock);
+  } else if (!strcmp(tok[0], "pvrset") || !strcmp(tok[0], "pvrstream")) {
+    out(fd, "error use authenticated TUNE for record-only capture\n");
   } else if (!strcmp(tok[0], "mktsioparams") && n >= 4) {
     // mktsioparams <k_struct> <k_name> <pathval(hex/dec)>
     // writes {ptr_to_scr[k_name], pathval, 0, 0, ...} into scr[k_struct] natively,
@@ -426,107 +316,9 @@ static void handle(int fd, char *line) {
   }
 }
 
-// --- Interposition hooks: log real args used by the official record path, then forward.
-// Previous attempt resolved dlsym(RTLD_NEXT,...) lazily on first call, from inside a hook
-// that itself may have been reached via lazy PLT binding -> reentrant linker lock ->
-// hang -> watchdog reboot. Fix: resolve all RTLD_NEXT targets eagerly in the constructor,
-// before any real traffic can reach these hooks, so no hook ever calls dlsym itself.
-static int (*real_tsr_open)(void *, void *);
-static int (*real_tsio_open)(void *, void *);
-static int (*real_tuner_gethandle)(const uint8_t *, void *);
-static int (*real_tsio_connectinput)(uint32_t, uint32_t, void *);
-static int (*real_dmx_open)(void *, void *);
-static volatile int hooks_armed = 0;
-
-static void hexdump_log(const char *tag, void *p, int n) {
-  unsigned char *b = p;
-  char line[256];
-  int o = 0;
-  for (int i = 0; i < n && o < (int)sizeof line - 3; i++) o += snprintf(line + o, sizeof line - o, "%02x", b[i]);
-  LOG("%s bytes[%d]=%s", tag, n, line);
-}
-
-int MI_TSR_Open(void *pOpenParams, void *pHandle) {
-  if (!hooks_armed || !real_tsr_open) return -1;
-  hexdump_log("MI_TSR_Open.params.orig", pOpenParams, 64);
-  // 進捗27-28: mif_tsi_pvr_init() never fills in the TSIO handle at
-  // offset+4 of this struct (stays 0), which the kernel's
-  // _MI_TSIO_Handle2Slot() rejects outright (param_1==0 -> error 7),
-  // causing MI_TSR_Open to always fail with eResult=3. The real live-view
-  // TSIO handle is always 0xab000000 (confirmed many times this session
-  // via mif_demux_get_path_params and our own MI_DMX_Open captures).
-  // Patch it in here, in-flight, right before the real call -- this is the
-  // firmware's own missing assignment, not a guess.
-  if (g_tsr_patch_tsio && pOpenParams && !*(uint32_t *)((char *)pOpenParams+4)) {
-    *(uint32_t *)((char *)pOpenParams + 4) = 0xab000000;
-  }
-  hexdump_log("MI_TSR_Open.params.patched", pOpenParams, 64);
-  int r = real_tsr_open(pOpenParams, pHandle);
-  LOG("MI_TSR_Open -> %d handle=0x%x", r, pHandle ? *(uint32_t *)pHandle : 0);
-  return r;
-}
-
-int MI_TSIO_Open(void *pOpenParams, void *pHandle) {
-  if (!hooks_armed || !real_tsio_open) return -1;
-  hexdump_log("MI_TSIO_Open.params", pOpenParams, 64);
-  int r = real_tsio_open(pOpenParams, pHandle);
-  LOG("MI_TSIO_Open -> %d handle=0x%x", r, pHandle ? *(uint32_t *)pHandle : 0);
-  return r;
-}
-
-int MI_TUNER_GetHandle(const uint8_t *params, void *pHandle) {
-  if (!hooks_armed || !real_tuner_gethandle) return -1;
-  int r = real_tuner_gethandle(params, pHandle);
-  LOG("MI_TUNER_GetHandle(params=%p) -> %d handle=0x%x", params, r, pHandle ? *(uint32_t *)pHandle : 0);
-  return r;
-}
-
-int MI_TSIO_ConnectInput(uint32_t hTsio, uint32_t hSource, void *pParams) {
-  if (!hooks_armed || !real_tsio_connectinput) return -1;
-  hexdump_log("MI_TSIO_ConnectInput.params", pParams, 32);
-  int r = real_tsio_connectinput(hTsio, hSource, pParams);
-  LOG("MI_TSIO_ConnectInput(hTsio=0x%x,hSource=0x%x) -> %d", hTsio, hSource, r);
-  return r;
-}
-
-int MI_DMX_Open(void *pParam1, void *pHandle) {
-  if (!hooks_armed || !real_dmx_open) return -1;
-  hexdump_log("MI_DMX_Open.param1", pParam1, 64);
-  int r = real_dmx_open(pParam1, pHandle);
-  LOG("MI_DMX_Open -> %d handle=0x%x", r, pHandle ? *(uint32_t *)pHandle : 0);
-  return r;
-}
-
-// Runs only from the background thread (never from a hook / never reentrant with a
-// live PLT lazy-bind), but must wait for libmi3.so to actually be mapped first, or
-// dlsym(RTLD_NEXT,...) finds nothing (LD_PRELOAD libs load before the main binary's
-// own NEEDED libs, so at constructor time libmi3.so isn't loaded yet).
-static void arm_hooks(void) {
-  // Android's dlopen() defaults to local visibility, so a libmi3.so the main
-  // binary dlopen'd itself may be invisible to RTLD_NEXT/RTLD_DEFAULT lookups
-  // from here. Get our own handle on it directly and dlsym from that handle,
-  // which works regardless of global/local scoping.
-  void *h = NULL;
-  for (int i = 0; i < 60; i++) {
-    h = dlopen("libmi3.so", RTLD_NOW | RTLD_NOLOAD);
-    if (h) break;
-    usleep(500000);
-  }
-  if (!h) { LOG("arm_hooks: libmi3.so never appeared"); hooks_armed = 1; return; }
-  real_tsr_open = (int (*)(void *, void *))dlsym(h, "MI_TSR_Open");
-  real_tsio_open = (int (*)(void *, void *))dlsym(h, "MI_TSIO_Open");
-  real_tuner_gethandle = (int (*)(const uint8_t *, void *))dlsym(h, "MI_TUNER_GetHandle");
-  real_tsio_connectinput = (int (*)(uint32_t, uint32_t, void *))dlsym(h, "MI_TSIO_ConnectInput");
-  real_dmx_open = (int (*)(void *, void *))dlsym(h, "MI_DMX_Open");
-  LOG("arm_hooks: tsr_open=%p tsio_open=%p tuner_gethandle=%p tsio_connectinput=%p dmx_open=%p",
-      real_tsr_open, real_tsio_open, real_tuner_gethandle, real_tsio_connectinput, real_dmx_open);
-  hooks_armed = 1;
-}
-
 static void *serve(void *arg) {
   (void)arg;
   sleep(5);
-  arm_hooks();  // background thread, independent call stack: safe to dlsym here.
   pthread_t control_thread;
   if (!pthread_create(&control_thread, NULL, control_server, NULL)) pthread_detach(control_thread);
   for (int i = 0; i < NSCR; i++) scr[i] = calloc(1, SCRSZ);

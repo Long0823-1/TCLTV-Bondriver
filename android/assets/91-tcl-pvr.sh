@@ -33,47 +33,25 @@ fi
 ip link set eth0 up
 ip -4 addr show eth0 | grep -q '169.254.95.200/16' || ip addr add 169.254.95.200/16 dev eth0
 count=0
-while ! "$CTL" pvrstatus >/dev/null 2>&1;do
+while ! "$CTL" --status >/dev/null 2>&1;do
  count=$((count+1));[ "$count" -ge 30 ] && exit 1;sleep 2
 done
-if "$CTL" pvrstatus | grep -q 'running=1';then
- echo 'PVR already running; preserving current channel.';exit 0
+if "$CTL" --status | grep -Eq ' running=1 .* service=[1-9][0-9]* ';then
+ echo 'Record-only tuner already running; preserving current channel.';exit 0
 fi
-# Restore the saved channel, otherwise use this TV's scan results.
-tuple=
-pids=0000
-if [ -r /data/local/tmp/tsd_last_channel ];then
- saved_tuple=$(sed -n '1p' /data/local/tmp/tsd_last_channel)
- saved_pids=$(sed -n '2p' /data/local/tmp/tsd_last_channel)
- case "$saved_tuple" in ''|*[!0-9a-fA-F]*) saved_tuple=;;esac
- case "$saved_pids" in ''|*[!0-9a-fA-F]*) saved_pids=;;esac
- [ "${#saved_tuple}" -eq 12 ] && tuple=$saved_tuple
- if [ -n "$saved_pids" ] && [ "${#saved_pids}" -le 252 ];then pids=$saved_pids;fi
+# Restore the record-only tuple, otherwise use this TV's scan results.
+onid=;tsid=;sid=
+if [ -r /data/local/tmp/tsd_last_record_channel_0 ];then
+ read -r onid tsid sid < /data/local/tmp/tsd_last_record_channel_0
 fi
-valid=
-if [ "${#tuple}" -eq 12 ];then
- "$CTL" "pokek 3 0 $tuple" >/dev/null
- valid=$("$CTL" 'call db_dtv_get_prog_info_by_triplet @4 @3')
-fi
-if [ "$valid" != 'ret=0x1 (1)' ];then
+valid_id() { case "$1" in ''|*[!0-9]*) return 1;;esac;[ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+if ! valid_id "$onid" || ! valid_id "$tsid" || ! valid_id "$sid";then
  tuple=$(first_scanned_tuple)
- [ "${#tuple}" -eq 12 ] || { echo 'No visible terrestrial channel: scan channels on the TV first.';exit 2; }
- pids=0000
- "$CTL" "pokek 3 0 $tuple" >/dev/null
- valid=$("$CTL" 'call db_dtv_get_prog_info_by_triplet @4 @3')
+ [ "${#tuple}" -eq 12 ] || { echo 'Scan terrestrial channels on the TV first.';exit 2; }
+ u16hex() { printf '%d' "0x$(printf '%s' "$1" | cut -c3-4)$(printf '%s' "$1" | cut -c1-2)"; }
+ sid=$(u16hex "$(printf '%s' "$tuple" | cut -c1-4)")
+ tsid=$(u16hex "$(printf '%s' "$tuple" | cut -c5-8)")
+ onid=$(u16hex "$(printf '%s' "$tuple" | cut -c9-12)")
 fi
-[ "$valid" = 'ret=0x1 (1)' ] || { echo 'The scanned channel is not in the native DB; rescan on the TV.';exit 2; }
-"$CTL" 'call tvhdtv_play_program_by_triplet @3'
-count=0
-while :;do
- "$CTL" 'call fpi_demod_get_lock_status 0 @6' >/dev/null
- locked=$("$CTL" 'peekk 6 1')
- [ "$locked" = '01' ] && break
- count=$((count+1));[ "$count" -ge 30 ] && { echo 'Native tuner lock timed out.';exit 3; };sleep 1
-done
-"$CTL" 'call mif_tsi_pvr_init' "pvrset $pids" 'pvrstream 40556' pvrstatus
-if "$CTL" pvrstatus | grep -q 'running=1';then
- echo 'TCL PVR boot initialization finished.'
-else
- echo 'PVR initialization failed.';exit 4
-fi
+"$CTL" --tune "$onid" "$tsid" "$sid" || { echo 'Record-only initialization failed.';exit 5; }
+echo 'TCL record-only tuner boot initialization finished.'

@@ -23,3 +23,5 @@ __pycache__/
 *.pass
 
 *.before-setup-*
+
+native/tests/build-test.cmd

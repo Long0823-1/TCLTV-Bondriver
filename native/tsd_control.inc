@@ -5,140 +5,15 @@
 static pthread_mutex_t g_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_tune_serial=PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_tune1_serial=PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_control_cond=PTHREAD_COND_INITIALIZER;
-static uint32_t g_pvr_generation;
-static int g_control_listening, g_control_clients;
-static struct {
- int phase;
- uint32_t generation;
- uint16_t tsid, sid, onid, pmt;
- struct tsd_psi pat_parser, pmt_parser;
- struct tsd_service_pids service;
- int video_clear,audio_clear;
- uint16_t selected[3];
- struct tsd_service_pids previous;
-} g_control;
+static int g_control_listening,g_control_clients;
 
-enum { WAIT_PAT=1,HAVE_PAT,WAIT_PMT,HAVE_PMT,WAIT_AV,HAVE_AV };
-static int pvr_configure(const uint16_t *pids,size_t count,uint32_t *generation) {
- if(!count || count>63) return 8;
- for(size_t i=0;i<count;++i) if(pids[i]>0x1fff) return 8;
- int (*stop_fn)(void)=resolve("mif_tsi_pvr_stop");
- int (*set_fn)(const uint16_t *,uint32_t)=resolve("mif_tsi_pvr_set_filters");
- int (*start_fn)(void)=resolve("mif_tsi_pvr_start");
- if(!stop_fn || !set_fn || !start_fn) return 8;
- pthread_mutex_lock(&g_pvr_lock);
- int result=stop_fn();
- if(!result) result=set_fn(pids,(uint32_t)count);
- if(!result) result=start_fn();
- ++g_pvr_generation;
- if(generation) *generation=g_pvr_generation;
- g_pvr_error=result;
- pthread_mutex_unlock(&g_pvr_lock);
- return result;
-}
-static void control_section(void *unused,const uint8_t *section,size_t length) {
- (void)unused;
- if(g_control.phase==WAIT_PAT && tsd_pat_pmt(section,length,g_control.tsid,g_control.sid,&g_control.pmt)==0) {
-  g_control.phase=HAVE_PAT; pthread_cond_broadcast(&g_control_cond);
- } else if(g_control.phase==WAIT_PMT && tsd_pmt_pids(section,length,g_control.sid,&g_control.service)==0 &&
-           tsd_pid_add(&g_control.service,g_control.pmt)==0) {
-  g_control.phase=HAVE_PMT; pthread_cond_broadcast(&g_control_cond);
- }
-}
-static void control_feed(const uint8_t *data,size_t length,uint32_t generation) {
- pthread_mutex_lock(&g_control_lock);
- if(g_control.generation!=generation || !g_control.phase) { pthread_mutex_unlock(&g_control_lock); return; }
- for(size_t i=0;i+188<=length;i+=188) {
-  const uint8_t *p=data+i;
-  if(p[0]!=0x47) continue;
-  if(g_control.phase==WAIT_PAT) tsd_psi_feed(&g_control.pat_parser,p,control_section,NULL);
-  else if(g_control.phase==WAIT_PMT) tsd_psi_feed(&g_control.pmt_parser,p,control_section,NULL);
-  else if(g_control.phase==WAIT_AV && !(p[1]&0x80) && !(p[3]&0xc0) && (p[1]&0x40)) {
-   unsigned pid=(((unsigned)p[1]&31)<<8)|p[2], afc=(p[3]>>4)&3;
-   size_t offset=4+((afc&2)?1+p[4]:0);
-   if(!(afc&1) || offset+4>188 || p[offset] || p[offset+1] || p[offset+2]!=1) continue;
-   if(pid==g_control.service.video) g_control.video_clear=1;
-   if(pid==g_control.service.audio) g_control.audio_clear=1;
-   if(g_control.video_clear && g_control.audio_clear) { g_control.phase=HAVE_AV; pthread_cond_broadcast(&g_control_cond); }
-  }
- }
- pthread_mutex_unlock(&g_control_lock);
-}
-static int control_wait(int phase,int seconds) {
- struct timespec deadline; clock_gettime(CLOCK_REALTIME,&deadline); deadline.tv_sec+=seconds;
- pthread_mutex_lock(&g_control_lock);
- int result=0;
- while(g_control.phase<phase && !result) result=pthread_cond_timedwait(&g_control_cond,&g_control_lock,&deadline);
- int ready=g_control.phase>=phase;
- pthread_mutex_unlock(&g_control_lock);
- return ready ? 0 : -1;
-}
-static void control_save(const uint16_t tuple[3],const struct tsd_service_pids *service) {
- const char *temporary="/data/local/tmp/tsd_last_channel.new";
- FILE *file=fopen(temporary,"w");
- if(!file) return;
- for(int i=0;i<3;++i) fprintf(file,"%02x%02x",tuple[i]&255,tuple[i]>>8);
- fputc('\n',file);
- for(unsigned i=0;i<service->count;++i) fprintf(file,"%02x%02x",service->pids[i]&255,service->pids[i]>>8);
- fputc('\n',file);
- int failed=ferror(file); if(fclose(file))failed=1;
- if(!failed) rename(temporary,"/data/local/tmp/tsd_last_channel"); else unlink(temporary);
-}
-static int control_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *av_clear) {
- int (*lookup)(void *,const uint16_t *)=resolve("db_dtv_get_prog_info_by_triplet");
- int (*play)(const uint16_t *)=resolve("tvhdtv_play_program_by_triplet");
- if(!lookup || !play) return 8;
- uint16_t tuple[3]={sid,tsid,onid}, old_tuple[3];
- struct tsd_service_pids old_service;
- void *program=calloc(1,0x10000);
- if(!program) return 3;
- int exists=lookup(program,tuple); free(program);
- if(exists!=1) return 9;
- pthread_mutex_lock(&g_control_lock);
- memcpy(old_tuple,g_control.selected,sizeof(old_tuple)); old_service=g_control.previous;
- memset(&g_control.service,0,sizeof(g_control.service));
- g_control.tsid=tsid; g_control.sid=sid; g_control.onid=onid;
- g_control.phase=WAIT_PAT; g_control.generation=UINT32_MAX;
- tsd_psi_reset(&g_control.pat_parser,0);
- pthread_mutex_unlock(&g_control_lock);
- int result=play(tuple);
- if(!result) usleep(4000000); // Allow the vendor channel-change path to release/reset its recording flow.
- uint32_t generation=0;
- uint16_t pids[2]={0,0};
- if(!result) result=pvr_configure(pids,1,&generation);
- pthread_mutex_lock(&g_control_lock); g_control.generation=generation; pthread_mutex_unlock(&g_control_lock);
- if(!result && control_wait(HAVE_PAT,20)) result=20;
- if(!result) {
-  pthread_mutex_lock(&g_control_lock);
-  pids[1]=g_control.pmt;
-  tsd_psi_reset(&g_control.pmt_parser,pids[1]);
-  g_control.phase=WAIT_PMT; g_control.generation=UINT32_MAX;
-  pthread_mutex_unlock(&g_control_lock);
-  result=pvr_configure(pids,2,&generation);
-  pthread_mutex_lock(&g_control_lock); g_control.generation=generation; pthread_mutex_unlock(&g_control_lock);
-  if(!result && control_wait(HAVE_PMT,10)) result=21;
- }
- struct tsd_service_pids service;
- if(!result) {
-  pthread_mutex_lock(&g_control_lock);
-  service=g_control.service; g_control.phase=WAIT_AV; g_control.generation=UINT32_MAX;
-  g_control.video_clear=service.video==0xffff; g_control.audio_clear=service.audio==0xffff;
-  if(g_control.video_clear && g_control.audio_clear)g_control.phase=HAVE_AV;
-  pthread_mutex_unlock(&g_control_lock);
-  result=pvr_configure(service.pids,service.count,&generation);
-  pthread_mutex_lock(&g_control_lock); g_control.generation=generation; pthread_mutex_unlock(&g_control_lock);
-  if(!result) {
-   *av_clear=control_wait(HAVE_AV,6)==0;
-   pthread_mutex_lock(&g_control_lock);
-   memcpy(g_control.selected,tuple,sizeof(tuple)); g_control.previous=service;
-   pthread_mutex_unlock(&g_control_lock);
-   control_save(tuple,&service);
-  }
- }
- pthread_mutex_lock(&g_control_lock); g_control.phase=0; pthread_mutex_unlock(&g_control_lock);
- if(result && old_tuple[0] && old_service.count) { play(old_tuple); usleep(500000); pvr_configure(old_service.pids,old_service.count,NULL); }
- return result;
+static struct {uint16_t selected[3];} g_control;
+#include "tsd_primary_cas.inc"
+#include "tsd_record_primary.inc"
+
+static int control_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear){
+ int r=d0_dual_tune(onid,tsid,sid,clear);
+ if(!r){pthread_mutex_lock(&g_control_lock);g_control.selected[0]=sid;g_control.selected[1]=tsid;g_control.selected[2]=onid;pthread_mutex_unlock(&g_control_lock);}return r;
 }
 static int control_authenticated(const char *supplied) {
  char token[128];
@@ -183,14 +58,14 @@ static void *control_client(void *arg) {
  char *words[8],*context=NULL; int count=0;
  for(char *word=strtok_r(line," \r\t",&context);word && count<8;word=strtok_r(NULL," \r\t",&context))words[count++]=word;
  if(count<3 || strcmp(words[0],"AUTH") || !control_authenticated(words[1])) { out(fd,"ERR authentication\n"); goto done; }
- if(count==3 && !strcmp(words[2],"STATUS")) {
-  pthread_mutex_lock(&g_pvr_lock);
-  int running=g_pvrstream_started, error=g_pvr_error;
-  unsigned long long bytes=g_pvr_bytes,sent=g_pvr_sent;
-  pthread_mutex_unlock(&g_pvr_lock);
-  pthread_mutex_lock(&g_control_lock);
-  unsigned sid=g_control.selected[0],tsid=g_control.selected[1];
-  pthread_mutex_unlock(&g_control_lock);
+ if(count==4 && !strcmp(words[2],"SIGNAL") && (!strcmp(words[3],"0")||!strcmp(words[3],"1"))) {
+  control_signal(fd,words[3][0]-'0');
+ } else if(count==3 && !strcmp(words[2],"STATUS")) {
+  pthread_mutex_lock(&d0_dual_lock);
+  int running=d0_dual_state.running,error=d0_dual_state.error;
+  unsigned long long bytes=d0_dual_state.bytes,sent=d0_dual_state.sent;
+  unsigned sid=d0_dual_state.sid,tsid=d0_dual_state.tsid;
+  pthread_mutex_unlock(&d0_dual_lock);
   pthread_mutex_lock(&d2_dual_lock);
   int second_running=d2_dual_state.running,second_error=d2_dual_state.error;unsigned second_tsid=d2_dual_state.tsid,second_sid=d2_dual_state.sid;
   unsigned long long second_bytes=d2_dual_state.bytes,second_sent=d2_dual_state.sent;
@@ -221,13 +96,14 @@ static void *control_restore_second(void *unused) {
  unsigned onid,tsid,sid;int count=fscanf(f,"%u %u %u",&onid,&tsid,&sid);fclose(f);
  if(count!=3||!onid||!tsid||!sid||onid>65535||tsid>65535||sid>65535)return NULL;
  int running=0;
- for(int i=0;i<1800;i++){pthread_mutex_lock(&g_pvr_lock);running=g_pvrstream_started;pthread_mutex_unlock(&g_pvr_lock);if(running)break;usleep(100000);}
+ for(int i=0;i<1800;i++){pthread_mutex_lock(&d0_dual_lock);running=d0_dual_state.ready;pthread_mutex_unlock(&d0_dual_lock);if(running)break;usleep(100000);}
  if(!running)return NULL;sleep(2);
  for(int i=0;i<3;i++){int clear=0;pthread_mutex_lock(&g_tune1_serial);int result=d2_dual_tune((uint16_t)onid,(uint16_t)tsid,(uint16_t)sid,&clear);pthread_mutex_unlock(&g_tune1_serial);if(!result)return NULL;LOG("tuner1 boot restore result=%d",result);sleep(3);}
  return NULL;
 }
 static void *control_server(void *unused) {
  (void)unused;
+ if(d0_dual_stream_start())LOG("tuner0 stream listener unavailable");else g_pvrstream_started=1;
  if(d2_dual_stream_start())LOG("tuner1 stream listener unavailable");
  pthread_t restore; if(!pthread_create(&restore,NULL,control_restore_second,NULL))pthread_detach(restore);
  int listener=socket(AF_INET,SOCK_STREAM,0),one=1;
