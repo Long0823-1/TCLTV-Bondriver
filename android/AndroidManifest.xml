@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.long0823.tclbondriver" android:versionCode="7" android:versionName="0.4.2">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.github.long0823.tclbondriver" android:versionCode="8" android:versionName="0.5.0">
  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="32"/>
  <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.WAKE_LOCK"/>
+ <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
  <uses-feature android:name="android.software.leanback" android:required="false"/>
  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
  <application android:label="TCL BonDriver セットアップ" android:theme="@android:style/Theme.Material.NoActionBar" android:icon="@drawable/icon" android:banner="@drawable/banner" android:allowBackup="false" android:supportsRtl="true">
@@ -9,5 +13,7 @@
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
+  <service android:name=".NetworkService" android:exported="false"/>
+  <receiver android:name=".NetworkBootReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
  </application>
 </manifest>

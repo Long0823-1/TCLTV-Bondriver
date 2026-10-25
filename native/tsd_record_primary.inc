@@ -10,6 +10,7 @@ static int d0_prepare_normal(void) {
 static int d0_dual_listener=-1,d0_dual_client=-1;
 static unsigned long long d0_dual_sent;
 static unsigned d0_dual_clients,d0_dual_send_errors;
+static uint64_t d0_last_output;static uint64_t d0_now_ms(void);static int d0_dual_stopping(void);
 static int d0_dual_stream_start(void) {
  d0_dual_sent=0;d0_dual_clients=d0_dual_send_errors=0;d0_dual_listener=socket(AF_INET,SOCK_STREAM,0);if(d0_dual_listener<0)return -1;
  int one=1;setsockopt(d0_dual_listener,SOL_SOCKET,SO_REUSEADDR,&one,sizeof one);
@@ -20,9 +21,17 @@ static int d0_dual_stream_start(void) {
 static void d0_dual_stream_send(const void *data,size_t length) {
  if(d0_dual_client<0){d0_dual_client=accept(d0_dual_listener,NULL,NULL);if(d0_dual_client>=0){struct timeval timeout={0,100000};int buffer=1048576;setsockopt(d0_dual_client,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof timeout);setsockopt(d0_dual_client,SOL_SOCKET,SO_SNDBUF,&buffer,sizeof buffer);d0_dual_clients++;}}
  if(d0_dual_client<0)return;
- size_t offset=0;while(offset<length){ssize_t n=send(d0_dual_client,(const char *)data+offset,length-offset,MSG_NOSIGNAL);if(n<0&&errno==EINTR)continue;if(n<=0){d0_dual_send_errors++;close(d0_dual_client);d0_dual_client=-1;return;}offset+=(size_t)n;d0_dual_sent+=(unsigned long long)n;}
+ size_t offset=0;while(offset<length){ssize_t n=send(d0_dual_client,(const char *)data+offset,length-offset,MSG_NOSIGNAL);if(n<0&&errno==EINTR)continue;if(n<=0){d0_dual_send_errors++;close(d0_dual_client);d0_dual_client=-1;return;}offset+=(size_t)n;d0_dual_sent+=(unsigned long long)n;}d0_last_output=d0_now_ms();
 }
 
+
+// Keep the authenticated stream alive during TCL's transient primary-bank stop.
+// Null TS packets carry no AV data and leave scramble flags unchanged.
+static void d0_dual_keepalive(void) {
+ if(d0_dual_client<0||d0_dual_stopping()||d0_now_ms()-d0_last_output<400)return;
+ uint8_t packet[188];memset(packet,0xff,sizeof packet);packet[0]=0x47;packet[1]=0x1f;packet[2]=0xff;packet[3]=0x10;
+ d0_dual_stream_send(packet,sizeof packet);
+}
 
 #define DO(name,a,b,c) d2_invoke(name,(uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c))
 static uint64_t d0_now_ms(void) {struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
@@ -84,7 +93,7 @@ static int d0_dual_capture(void) {
  result=d2_record_init();if(result)goto done;
  result=DO("fpi_demod_start_connect",cfg,0,0);if(result)goto done;tuned=1;
  uint64_t deadline=d0_now_ms()+10000,last_data=d0_now_ms();uint8_t locked=0;
- do {if(d0_dual_stopping())goto done;DO("fpi_demod_get_lock_status",0,&locked,0);if(locked)break;usleep(50000);}while(d0_now_ms()<deadline);
+ do {if(d0_dual_stopping())goto done;DO("fpi_demod_get_lock_status",0,&locked,0);if(locked)break;d0_dual_keepalive();usleep(50000);}while(d0_now_ms()<deadline);
  if(!locked){result=20;goto done;}
  result=DO("mif_demux_get_path_params",0,saved,0);if(result)goto done;
  tsio=saved[0];source=saved[1];if((tsio>>24)!=0xab||(source>>24)!=0xae){result=43;goto done;}
@@ -103,8 +112,8 @@ static int d0_dual_capture(void) {
  pthread_mutex_lock(&d0_dual_lock);d0_dual_state.running=1;d0_dual_state.error=0;d0_dual_state.video_clear=d0_dual_state.audio_clear=0;pthread_mutex_unlock(&d0_dual_lock);
  struct {void *data;uint32_t capacity;} buffer={data,sizeof data};
  while(!d0_dual_stopping()) {
-  uint32_t size=0;result=DO("MI_TSR_Read",record,&buffer,&size);
-  if(result==3 || (!result&&!size)) {if(d0_now_ms()>last_data+10000){result=21;goto done;}usleep(3000);continue;}
+  d0_dual_keepalive();uint32_t size=0;result=DO("MI_TSR_Read",record,&buffer,&size);
+  if(result==3 || (!result&&!size)) {if(d0_now_ms()>last_data+(d0_dual_state.ready?1500:10000)){result=21;goto done;}usleep(3000);continue;}
   if(result)goto done;if(size>sizeof data || size%188){result=31;goto done;}last_data=d0_now_ms();
   unsigned sync=0,cc_errors=0,tei=0;
   for(uint32_t i=0;i<size;i+=188) {
@@ -149,9 +158,9 @@ static int d0_dual_capture(void) {
  }
  done:
  // Keep immutable queued ECM frames alive across retries and channel changes.
- if(d0_dual_client>=0){close(d0_dual_client);d0_dual_client=-1;}
+ if(d0_dual_stopping()&&d0_dual_client>=0){close(d0_dual_client);d0_dual_client=-1;}
  uint64_t drain_deadline=d0_now_ms()+3000;
- while(__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST)<d0_ecm_issued && d0_now_ms()<drain_deadline)usleep(10000);
+ while(__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST)<d0_ecm_issued && d0_now_ms()<drain_deadline){d0_dual_keepalive();usleep(10000);}
  if(cas)primary_other_close();
 
  if(mapped)DO("mif_demux_set_path_params",0,saved[0],saved[1]);
@@ -161,11 +170,11 @@ static int d0_dual_capture(void) {
  return result;
 }
 static void *d0_dual_main(void *unused) {
- (void)unused;
+ (void)unused;int was_ever_ready=0;
  while(!d0_dual_stopping()) {
   int result=d0_dual_capture();pthread_mutex_lock(&d0_dual_lock);int was_ready=d0_dual_state.ready;d0_dual_state.running=0;d0_dual_state.ready=0;pthread_mutex_unlock(&d0_dual_lock);
-  if(d0_dual_stopping())break;d0_dual_signal_error(result?result:21);if(!was_ready)break;
-  for(int i=0;i<20&&!d0_dual_stopping();i++)usleep(100000);
+  if(d0_dual_stopping())break;d0_dual_signal_error(result?result:21);was_ever_ready|=was_ready;if(!was_ever_ready)break;
+  for(int i=0;i<20&&!d0_dual_stopping();i++){d0_dual_keepalive();usleep(100000);}
  }
  pthread_mutex_lock(&d0_dual_lock);d0_dual_state.running=0;pthread_cond_broadcast(&d0_dual_cond);pthread_mutex_unlock(&d0_dual_lock);return NULL;
 }

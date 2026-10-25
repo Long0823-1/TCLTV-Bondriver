@@ -25,3 +25,6 @@ __pycache__/
 *.before-setup-*
 
 native/tests/build-test.cmd
+
+*.m3u
+*.m3u8

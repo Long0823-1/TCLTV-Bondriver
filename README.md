@@ -4,14 +4,26 @@ TCL G06日本向けAndroid TVの地デジを、WindowsのBonDriver対応ソフ�
 
 TV用セットアップAPK、Windows用セットアップツール、x86/x64のBonDriverを用意しています。初回設定後の選局・TS転送はTV内の常駐ネイティブサービスが行い、PC側のPythonやADB常駐は不要です。
 
-**配信本体・Windows一式 v0.4.1 / TVセットアップAPK v0.4.2（スマホ連携追加）。実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
+**配信本体・TV用APK・Windowsセットアップ一式 v0.5.0（消灯時の通信維持・IPTV）。実験的な対応機種限定版です。** 対応ファームウェアの実機で検証しています。他のTCL TV・ファームウェアへの適用は確認していません。
 
-Androidスマートフォン向けには、独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を用意しています。番組表・アプリ内再生・システムバーを隠す全画面・対応局の実ロゴ表示に対応し、TVセットアップAPK 0.4.2では確認コードで接続情報・スキャン済み局一覧をスマホへ渡せます。
+Androidスマートフォン向けには、独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を用意しています。番組表・アプリ内再生・システムバーを隠す全画面・対応局の実ロゴ表示に対応し、TVセットアップAPK 0.5.0では確認コードで接続情報・スキャン済み局一覧をスマホへ渡せます。
+## 0.5.0の更新
+
+- 通常のリモコン短押しで画面を消しても、Wi-Fi・有線LANと配信処理を維持する常駐サービスを追加。
+- TCLの常駐許可はこのアプリだけを追加し、停止操作で追加分と変更した電源設定を戻します。
+- 第1チューナーが消灯時に一時停止した際もTS接続を保持して再捕捉します。再捕捉中は短い映像・音声の停止が起こる場合があります。
+- TVでM3UプレイリストとHTTP MPEG-TSを配信。TVのスキャン結果から局一覧を生成し、一般IPTVプレイヤー向けに指定番組だけを送ります。
+- スマホ版0.4.0ではTVからIPTV専用情報を取得し、M3U URLを表示・コピーできます。
+
+通信維持中は通常の省電力待機より消費電力が増え、AC給電中の自動消灯も抑制されます。リモコンでの画面消灯は可能です。対象は対応ファームウェアの通常待機です。
+
+[更新・消灯時の通信維持](docs/SLEEP_IPTV.md) · [IPTVの使い方](docs/IPTV.md) · [0.5.0実機検証](validation/v0.5.0.md)
+
 ## ダウンロードと手順
 
-- [Windows・初回TVセットアップ一式 ZIP（v0.4.1）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.4.1/TCLTV-Bondriver-v0.4.1.zip)
-- [TVセットアップAPK 0.4.2（モバイル連携）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/tag/v0.4.2)
-- [Androidスマホ用APK 0.3.0](https://github.com/Long0823-1/TCLTV-Android-Viewer/releases/tag/v0.3.0)
+- [Windows・初回TVセットアップ一式 ZIP（v0.5.0）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/download/v0.5.0/TCLTV-Bondriver-v0.5.0.zip)
+- [TVセットアップAPK 0.5.0（通信維持・IPTV）](https://github.com/Long0823-1/TCLTV-Bondriver/releases/tag/v0.5.0)
+- [Androidスマホ用APK 0.4.0](https://github.com/Long0823-1/TCLTV-Android-Viewer/releases/tag/v0.4.0)
 - [スマホの接続手順](docs/mobile-pairing.md)
 - **[スクショ付きセットアップ手順](docs/SETUP.md)**
 - [ビルド方法](docs/BUILD.md)
@@ -62,4 +74,4 @@ TVTestを閉じて新しいAPKでセットアップし、TVを再起動します
 
 ## Androidスマートフォンで視聴
 
-独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を使用できます。TVセットアップAPK 0.4.2では、スマホへ確認コードで接続情報・局一覧を渡す機能を追加しました。[接続手順](docs/mobile-pairing.md)を参照してください。
+独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を使用できます。TVセットアップAPK 0.5.0では、スマホへ確認コードで接続情報・局一覧を渡す機能を追加しました。[接続手順](docs/mobile-pairing.md)を参照してください。

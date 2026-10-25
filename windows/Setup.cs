@@ -21,17 +21,17 @@ namespace TclBonDriverSetup {
   readonly Button install=new Button(),pair=new Button(),test=new Button(),browse=new Button(),detect=new Button();
   readonly string root=AppDomain.CurrentDomain.BaseDirectory;
   public SetupForm() {
-   Text="TCL BonDriver セットアップ";ClientSize=new Size(780,610);MinimumSize=new Size(720,590);Font=new Font("Yu Gothic UI",10);StartPosition=FormStartPosition.CenterScreen;
+   Text="TCL BonDriver セットアップ 0.5.0";ClientSize=new Size(780,610);MinimumSize=new Size(720,590);Font=new Font("Yu Gothic UI",10);StartPosition=FormStartPosition.CenterScreen;
    var panel=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=9,Padding=new Padding(20)};
    panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,155));panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,90));Controls.Add(panel);
    var title=new Label {Text="TCL BonDriver",Font=new Font(Font.FontFamily,20,FontStyle.Bold),AutoSize=true};panel.Controls.Add(title,0,0);panel.SetColumnSpan(title,3);
-   var intro=new Label {Text="TV用APKを導入し、PCの視聴ソフトへBonDriverを配置します。",AutoSize=true,Margin=new Padding(0,10,0,15)};panel.Controls.Add(intro,0,1);panel.SetColumnSpan(intro,3);
+   var intro=new Label {Text="TV用APKを導入し、PCの視聴ソフトへBonDriverを配置します。0.5.0：消灯中の通信維持・IPTV連携。",AutoSize=true,Margin=new Padding(0,10,0,15)};panel.Controls.Add(intro,0,1);panel.SetColumnSpan(intro,3);
    AddField(panel,2,"ADB接続先",adbSerial,"");AddField(panel,3,"TVの接続先IP",host,"");detect.Text="IP取得";detect.Dock=DockStyle.Fill;panel.Controls.Add(detect,2,3);AddField(panel,4,"TVTestのフォルダー",destination,"");browse.Text="選択…";browse.Dock=DockStyle.Fill;panel.Controls.Add(browse,2,4);
    browse.Click+=(s,e)=>{using(var d=new FolderBrowserDialog()) {d.Description="TVTest.exeがあるフォルダー";if(d.ShowDialog(this)==DialogResult.OK)destination.Text=d.SelectedPath;}};
    install.Text="1. APKをTVへ導入";pair.Text="2. 接続設定・局一覧を更新";test.Text="3. 配信をテスト";
    var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill,Margin=new Padding(0,18,0,10)};foreach(var b in new[]{install,pair,test}) {b.AutoSize=true;b.MinimumSize=new Size(195,38);buttons.Controls.Add(b);}dual.Text="2チューナー分のBonDriverを配置する";dual.Checked=true;dual.AutoSize=true;panel.Controls.Add(dual,0,5);panel.SetColumnSpan(dual,3);
    autoIp.Text="TVのIPを自動取得";autoIp.Checked=true;autoIp.AutoSize=true;buttons.Controls.Add(autoIp);networkMode.DropDownStyle=ComboBoxStyle.DropDownList;networkMode.Items.AddRange(new object[]{"自動（有線LAN優先）","有線LAN","Wi-Fi"});networkMode.SelectedIndex=0;networkMode.Width=180;buttons.Controls.Add(networkMode);panel.Controls.Add(buttons,0,6);panel.SetColumnSpan(buttons,3);
-   var hint=new Label {AutoSize=true,Text="初回：TVのAPKでrootを許可し、セットアップ後に再起動してください。\nUSB接続の場合、ADB接続先を空欄にすると接続中の1台を自動選択します。"};panel.Controls.Add(hint,0,7);panel.SetColumnSpan(hint,3);
+   var hint=new Label {AutoSize=true,Text="初回：TVのAPKでrootを許可し、セットアップ後に再起動してください。\n更新時：TVのAPKで「画面消灯中の通信維持を有効にする」を選びます。IPTVのM3UはTV画面から確認できます。\nUSB接続の場合、ADB接続先を空欄にすると接続中の1台を自動選択します。"};panel.Controls.Add(hint,0,7);panel.SetColumnSpan(hint,3);
    log.Multiline=true;log.ReadOnly=true;log.ScrollBars=ScrollBars.Vertical;log.Dock=DockStyle.Fill;log.BackColor=Color.FromArgb(245,247,249);panel.Controls.Add(log,0,8);panel.SetColumnSpan(log,3);for(int i=0;i<8;i++)panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));panel.RowStyles.Add(new RowStyle(SizeType.Percent,100));
    install.Click+=async(s,e)=>await Work(InstallApk);pair.Click+=async(s,e)=>await Work(Pair);test.Click+=async(s,e)=>await Work(TestStream);detect.Click+=async(s,e)=>await Work(()=>DetectHost(Device()));
   }

@@ -1,5 +1,7 @@
 # スクショ付きセットアップ手順
 
+既存ユーザーの0.5.0への更新は[通信維持・IPTVの更新手順](SLEEP_IPTV.md)を参照してください。
+
 ## 事前に用意するもの
 
 - 対応するMagisk導入済みTCL G06。TV側で地デジのチャンネル設定を済ませます。
@@ -9,7 +11,7 @@
 
 ## 1. ZIPを展開してWindowsツールを開く
 
-`TCLTV-Bondriver-v0.4.0.zip` をすべて展開し、`TCL-BonDriver-Setup.exe` を起動します。
+`TCLTV-Bondriver-v0.5.0.zip` をすべて展開し、`TCL-BonDriver-Setup.exe` を起動します。
 
 - **ADB接続先**：ネットワークADBなら `TVのIP:5555`。USB接続で接続機器が1台だけなら空欄で選択できます。
 - **TVの接続先IP**：通常は空欄のままで構いません。「TVのIPを自動取得」は初期状態でオンです。接続方式は「自動（有線LAN優先）／有線LAN／Wi-Fi」から選択します。USBのADB接続からもTVのIPを取得できます。

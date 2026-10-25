@@ -21,6 +21,9 @@ while [ "$(getprop sys.boot_completed)" != '1' ] || [ ! -x "$CTL" ]; do
  count=$((count+1)); [ "$count" -ge 90 ] && exit 1
  sleep 2
 done
+if grep -q 'name="enabled" value="true"' /data/user/0/io.github.long0823.tclbondriver/shared_prefs/network-service.xml 2>/dev/null;then
+ am start-foreground-service -n io.github.long0823.tclbondriver/.NetworkService >/dev/null 2>&1
+fi
 network_pid=$(cat /data/local/tmp/tcl-pvr-net.pid 2>/dev/null)
 network_running=0
 case "$network_pid" in
