@@ -17,7 +17,7 @@ public final class MainActivity extends Activity {
  private final Runnable networkRefresh=new Runnable(){public void run(){updateNetwork();networkHandler.postDelayed(this,5000);}};
  private ProgressBar progress;
  private Button setup,start,reboot,refresh,restore;
- private File stage;
+ private File stage; private PhonePairing pairing; private AlertDialog pairingDialog;private android.net.nsd.NsdManager.RegistrationListener phoneAdvertisement;private TextView pairingInfo;private Button pairButton;
  private boolean destroyed;
  private int dp(int value) { return (int)(value*getResources().getDisplayMetrics().density+0.5f); }
  @Override public void onCreate(Bundle saved) {
@@ -27,7 +27,7 @@ public final class MainActivity extends Activity {
   TextView title=text("TCL BonDriver",28,Color.WHITE);root.addView(title);
   root.addView(text("テレビで別のアプリを使いながら、PCで異なる地デジ2局を同時受信",16,Color.rgb(180,197,208)));
   network=text("有線LAN IP：確認中…",22,Color.rgb(125,218,190));network.setTextIsSelectable(true);network.setPadding(0,dp(16),0,0);root.addView(network);
-  status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);
+  status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);pairingInfo=text("",28,Color.rgb(125,218,190));pairingInfo.setFocusable(true);pairingInfo.setVisibility(View.GONE);root.addView(pairingInfo);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress);
   setup=button(root,"1. セットアップ",()->perform("対応環境を確認し、セットアップしています…",()->{
    extract();String output=root("sh "+quote(new File(stage,"install.sh").getAbsolutePath())+" "+quote(stage.getAbsolutePath()),90);
@@ -40,11 +40,15 @@ public final class MainActivity extends Activity {
    boolean first=output.contains(" running=1 "),second=output.contains(" tuner1_ready=1 ");
    return "チューナー1："+(first?"配信中":"セットアップ後に再起動してください")+"\nチューナー2："+(second?"配信中":"選局待ち（PCの視聴ソフトで選局してください）")+"\n"+output;
   }));
+  pairButton=button(root,"スマートフォンを接続（確認コードを表示）",this::pairPhone);
   root.addView(text("対応環境：TCL G06 日本向け・Magisk導入済み\n初回はMagiskのroot許可が必要です。",14,Color.rgb(180,197,208)));
   details=text("",13,Color.rgb(154,182,194));details.setTextIsSelectable(true);details.setPadding(0,dp(20),0,dp(12));root.addView(details);
   restore=button(root,"セットアップ前の状態に戻す",()->new AlertDialog.Builder(this).setTitle("元の状態に戻しますか？").setMessage("保存済みの設定を復元します。反映にはテレビの再起動が必要です。").setNegativeButton("戻る",null).setPositiveButton("復元",(d,w)->perform("設定を復元しています…",()->{extract();return root("sh "+quote(new File(stage,"restore.sh").getAbsolutePath()),60);})).show());
   setup.requestFocus();
  }
+ private void pairPhone(){if(pairing!=null){pairing.close();pairing=null;stopPhoneAdvertisement();pairingInfo.setVisibility(View.GONE);pairButton.setText("スマートフォンを接続（確認コードを表示）");status.setText("スマートフォンの接続受付を終了しました");return;}pairButton.setEnabled(false);status.setText("スマートフォン用の設定を準備しています…");worker.submit(()->{try{byte[] data=PhonePairing.export();runOnUiThread(()->{if(destroyed)return;pairButton.setEnabled(true);try{pairing=new PhonePairing(data,message->runOnUiThread(()->{if(!destroyed){status.setText(message);pairing=null;stopPhoneAdvertisement();pairingInfo.setVisibility(View.GONE);pairButton.setText("スマートフォンを接続（確認コードを表示）");}}));advertisePhone();pairingInfo.setText("確認コード  "+pairing.code+"\nスマホにTVのIPとこの6桁を入力してください。\n2分間・1回のみ有効です。TVで他のアプリを開くと無効になります。");pairingInfo.setVisibility(View.VISIBLE);pairButton.setText("スマートフォンの接続受付を終了");pairingInfo.requestFocus();status.setText("スマートフォンの接続を待っています");}catch(Exception e){status.setText("接続の受付を開始できません。もう一度お試しください。");}});}catch(Exception e){runOnUiThread(()->{if(!destroyed){pairButton.setEnabled(true);status.setText(e.getMessage());}});}});}
+ private void advertisePhone(){stopPhoneAdvertisement();android.net.nsd.NsdManager nsd=(android.net.nsd.NsdManager)getSystemService(NSD_SERVICE);android.net.nsd.NsdServiceInfo service=new android.net.nsd.NsdServiceInfo();service.setServiceName("TCL TV");service.setServiceType("_tcltv._tcp.");service.setPort(40559);service.setAttribute("protocol","1");phoneAdvertisement=new android.net.nsd.NsdManager.RegistrationListener(){public void onServiceRegistered(android.net.nsd.NsdServiceInfo i){runOnUiThread(()->{if(pairing==null)stopPhoneAdvertisement();});}public void onRegistrationFailed(android.net.nsd.NsdServiceInfo i,int e){}public void onServiceUnregistered(android.net.nsd.NsdServiceInfo i){}public void onUnregistrationFailed(android.net.nsd.NsdServiceInfo i,int e){}};try{nsd.registerService(service,android.net.nsd.NsdManager.PROTOCOL_DNS_SD,phoneAdvertisement);}catch(Exception ignored){phoneAdvertisement=null;}}
+ private void stopPhoneAdvertisement(){if(phoneAdvertisement==null)return;try{((android.net.nsd.NsdManager)getSystemService(NSD_SERVICE)).unregisterService(phoneAdvertisement);}catch(Exception ignored){}phoneAdvertisement=null;}
  private void updateNetwork() {
   StringBuilder wired=new StringBuilder(),wifi=new StringBuilder();
   try {
@@ -55,11 +59,12 @@ public final class MainActivity extends Activity {
     StringBuilder target=ethernet?wired:wifi;java.util.Enumeration<java.net.InetAddress> addresses=iface.getInetAddresses();
     while(addresses.hasMoreElements()) {java.net.InetAddress address=addresses.nextElement();if(address instanceof java.net.Inet4Address&&!address.isLoopbackAddress()) {if(target.length()>0)target.append(" / ");target.append(address.getHostAddress());}}
    }
-   network.setText("有線LAN IP："+(wired.length()==0?"未接続・IPv4未取得":wired.toString())+"\nWi-Fi IP："+(wifi.length()==0?"未接続・IPv4未取得":wifi.toString())+"\nPCの接続先IP（セットアップツールで自動取得できます）");
+   network.setText("有線LAN IP："+(wired.length()==0?"未接続・IPv4未取得":wired.toString())+"\nWi-Fi IP："+(wifi.length()==0?"未接続・IPv4未取得":wifi.toString())+"\nPC・スマートフォンの接続先IP（PCセットアップ時は自動取得できます）");
   }catch(Exception error) {network.setText("IPを取得できません。TVのネットワーク設定を確認してください。");}
  }
  @Override protected void onResume() {super.onResume();networkHandler.removeCallbacks(networkRefresh);networkHandler.post(networkRefresh);}
- @Override protected void onPause() {networkHandler.removeCallbacks(networkRefresh);super.onPause();}
+ @Override protected void onPause(){networkHandler.removeCallbacks(networkRefresh);super.onPause();}
+ @Override protected void onStop(){if(pairing!=null){pairing.close();pairing=null;}stopPhoneAdvertisement();if(pairingInfo!=null)pairingInfo.setVisibility(View.GONE);if(pairButton!=null)pairButton.setText("スマートフォンを接続（確認コードを表示）");super.onStop();}
  private TextView text(String value,int size,int color) { TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v; }
  private Button button(LinearLayout parent,String label,Runnable click) {
   Button button=new Button(this);button.setText(label);button.setTextSize(16);button.setAllCaps(false);button.setFocusable(true);button.setMinHeight(dp(52));button.setOnClickListener(v->click.run());
