@@ -131,3 +131,7 @@ DLLを読み直し、TVTestでもチャンネルスキャンをやり直して�
 ![全サービスのPMTとデータPIDを受信](images/tvtest-multiprogram-pids.png)
 
 検証条件と測定結果は [v0.4.0検証記録](../validation/signal-multiprogram-v0.4.0.md) を参照してください。
+
+## v0.4.1での選局修正
+
+041等で発生していた復号枠の不足と、TOKYO MXを2系統で受信するときのPID枠不足を修正しました。新APKでセットアップし、TVを再起動してください。WindowsのDLL・局一覧はv0.4.0のものを引き続き使用できます。全登録サービスの試験結果は [v0.4.1検証記録](../validation/all-channels-v0.4.1.md) を参照してください。

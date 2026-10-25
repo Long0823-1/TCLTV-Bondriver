@@ -13,5 +13,12 @@ int main(void){
  unsigned pmts=0;for(unsigned i=0;i<out.count;i++)if(out.pids[i]==496||out.pids[i]==1008||out.pids[i]==1264)pmts++;assert(pmts==3);
  tsd_mux_reset(&d2_mux,32736);pat[7]=1;finish(pat,sizeof pat);feed(0,pat,sizeof pat);assert(d2_mux.error&&!tsd_mux_ready(&d2_mux));
  tsd_mux_reset(&d2_mux,32736);d2_mux.count=2;for(unsigned i=0;i<2;i++){d2_mux.programs[i].pid=(uint16_t)(500+i);d2_mux.programs[i].service.count=63;for(unsigned j=0;j<63;j++)d2_mux.programs[i].service.pids[j]=(uint16_t)(100+i*100+j);}assert(tsd_mux_union(&d2_mux,&out)==-1);
+ struct tsd_mux_program program;memset(&program,0,sizeof program);program.sid=1024;
+ uint8_t ca[38]={2,0,0,4,0,0xc1,0,0,0xe1,0,0xf0,6,9,4,0,5,0xe0,49,6,0xe1,0x15,0xf0,6,9,4,0,5,0xff,0xff,2,0xe1,0x11,0xf0,0};
+ finish(ca,sizeof ca);tsd_mux_pmt(&program,ca,sizeof ca);assert(program.ready&&tsd_mux_pid_clear(&program,277)&&!tsd_mux_pid_clear(&program,273));
+ assert(program.service.count>0);int kept=0;for(unsigned i=0;i<program.service.count;i++)if(program.service.pids[i]==277)kept=1;assert(kept);
+ ca[27]=0xe0;ca[28]=49;finish(ca,sizeof ca);tsd_mux_pmt(&program,ca,sizeof ca);assert(!tsd_mux_pid_clear(&program,277));
+ tsd_mux_reset(&d2_mux,32736);d2_mux.count=1;d2_mux.programs[0].pid=500;d2_mux.programs[0].service.video=d2_mux.programs[0].service.audio=0xffff;d2_mux.programs[0].service.count=1;d2_mux.programs[0].service.pids[0]=1000;
+ assert(!tsd_mux_union(&d2_mux,&out)&&out.count==1&&out.pids[0]==500);
  puts("mux: all PMTs, missing PMT, deduplication, section limit, PID limit passed");return 0;
 }

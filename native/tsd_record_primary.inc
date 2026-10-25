@@ -128,11 +128,11 @@ static int d0_dual_capture(void) {
   } else if(d0_dual_state.phase==2 && d0_dual_state.parsed && tsd_mux_ready(&d0_mux)) {
    DO("MI_TSR_Stop",record,0,0);
    struct tsd_service_pids mux_pids;if(tsd_mux_union(&d0_mux,&mux_pids)){result=41;goto done;}
-   for(unsigned i=0;i<mux_pids.count;i++){result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
+   for(unsigned i=0;i<mux_pids.count;i++){if(mux_pids.pids[i]==0||mux_pids.pids[i]==d0_dual_state.pmt)continue;result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
    all=0;
    result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
    if(d0_dual_state.service.ecm!=0xffff) {
-    struct tsd_service_pids all_service=d0_dual_state.service;all_service.video=all_service.audio=0xffff;
+    struct tsd_service_pids all_service=d0_dual_state.service;
     result=primary_other_open(&d0_mux,&all_service);if(result)goto done;cas=1;
     d0_cw_per_ecm=2;for(unsigned i=0;i<12;i++)if(primary_other[i].registered)d0_cw_per_ecm++;
     d0_ecm_issued=__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST);

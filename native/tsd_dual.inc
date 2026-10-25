@@ -200,7 +200,7 @@ static int d2_dual_capture(void) {
   } else if(d2_dual_state.phase==2 && d2_dual_state.parsed && tsd_mux_ready(&d2_mux)) {
    DO("MI_TSR_Stop",record,0,0);
    struct tsd_service_pids mux_pids;if(tsd_mux_union(&d2_mux,&mux_pids)){result=41;goto done;}
-   for(unsigned i=0;i<mux_pids.count;i++){result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
+   for(unsigned i=0;i<mux_pids.count;i++){if(mux_pids.pids[i]==0||mux_pids.pids[i]==d2_dual_state.pmt)continue;result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
    all=0;
    result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
    if(d2_dual_state.service.ecm!=0xffff) {
@@ -209,7 +209,7 @@ static int d2_dual_capture(void) {
     if(d2_dual_state.service.audio!=0xffff){result=DO("tvhdtv_set_pvr_desc_audio_pids",1,&d2_dual_state.service.audio,1);if(!result)result=DO("mif_ci_desc_connect_pvr_filter",d2_dual_state.service.audio,0,0);if(result)goto done;}
     uint16_t other[12];unsigned other_count=0;
     for(unsigned i=0;i<d2_mux.count;i++){struct tsd_service_pids *sp=&d2_mux.programs[i].service;if(sp->ecm!=d2_dual_state.service.ecm)continue;
-     for(unsigned j=0;j<sp->count;j++){uint16_t pid=sp->pids[j];if(pid<0x100||pid==sp->pcr||pid==sp->ecm||pid==d2_dual_state.service.video||pid==d2_dual_state.service.audio)continue;
+     for(unsigned j=0;j<sp->count;j++){uint16_t pid=sp->pids[j];if(tsd_mux_pid_clear(&d2_mux.programs[i],pid)||pid<0x100||pid==sp->pcr||pid==sp->ecm||pid==d2_dual_state.service.video||pid==d2_dual_state.service.audio)continue;
       unsigned k=0;for(;k<other_count;k++)if(other[k]==pid)break;if(k<other_count)continue;if(other_count==12){result=42;goto done;}other[other_count++]=pid;
      }
     }
