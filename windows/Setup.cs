@@ -21,11 +21,11 @@ namespace TclBonDriverSetup {
   readonly Button install=new Button(),pair=new Button(),test=new Button(),browse=new Button(),detect=new Button();
   readonly string root=AppDomain.CurrentDomain.BaseDirectory;
   public SetupForm() {
-   Text="TCL BonDriver セットアップ 0.5.0";ClientSize=new Size(780,610);MinimumSize=new Size(720,590);Font=new Font("Yu Gothic UI",10);StartPosition=FormStartPosition.CenterScreen;
+   Text="TCL BonDriver セットアップ 0.6.0";ClientSize=new Size(780,610);MinimumSize=new Size(720,590);Font=new Font("Yu Gothic UI",10);StartPosition=FormStartPosition.CenterScreen;
    var panel=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=9,Padding=new Padding(20)};
    panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,155));panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,90));Controls.Add(panel);
    var title=new Label {Text="TCL BonDriver",Font=new Font(Font.FontFamily,20,FontStyle.Bold),AutoSize=true};panel.Controls.Add(title,0,0);panel.SetColumnSpan(title,3);
-   var intro=new Label {Text="TV用APKを導入し、PCの視聴ソフトへBonDriverを配置します。0.5.0：消灯中の通信維持・IPTV連携。",AutoSize=true,Margin=new Padding(0,10,0,15)};panel.Controls.Add(intro,0,1);panel.SetColumnSpan(intro,3);
+   var intro=new Label {Text="TV用APKを導入し、PCの視聴ソフトへBonDriverを配置します。0.6.0：消灯中の通信維持・IPTV連携。",AutoSize=true,Margin=new Padding(0,10,0,15)};panel.Controls.Add(intro,0,1);panel.SetColumnSpan(intro,3);
    AddField(panel,2,"ADB接続先",adbSerial,"");AddField(panel,3,"TVの接続先IP",host,"");detect.Text="IP取得";detect.Dock=DockStyle.Fill;panel.Controls.Add(detect,2,3);AddField(panel,4,"TVTestのフォルダー",destination,"");browse.Text="選択…";browse.Dock=DockStyle.Fill;panel.Controls.Add(browse,2,4);
    browse.Click+=(s,e)=>{using(var d=new FolderBrowserDialog()) {d.Description="TVTest.exeがあるフォルダー";if(d.ShowDialog(this)==DialogResult.OK)destination.Text=d.SelectedPath;}};
    install.Text="1. APKをTVへ導入";pair.Text="2. 接続設定・局一覧を更新";test.Text="3. 配信をテスト";

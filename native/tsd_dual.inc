@@ -68,9 +68,10 @@ static int d2_dual_stream_start(void) {
  fcntl(d2_dual_listener,F_SETFL,O_NONBLOCK);return 0;
 }
 static void d2_dual_stream_send(const void *data,size_t length) {
- if(d2_dual_client<0){d2_dual_client=accept(d2_dual_listener,NULL,NULL);if(d2_dual_client>=0){struct timeval timeout={0,100000};int buffer=1048576;setsockopt(d2_dual_client,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof timeout);setsockopt(d2_dual_client,SOL_SOCKET,SO_SNDBUF,&buffer,sizeof buffer);d2_dual_clients++;}}
+ epg_emit(1,data,length);
+ if(d2_dual_client<0){d2_dual_client=accept(d2_dual_listener,NULL,NULL);if(d2_dual_client>=0){struct timeval timeout={0,100000};int buffer=1048576;setsockopt(d2_dual_client,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof timeout);setsockopt(d2_dual_client,SOL_SOCKET,SO_SNDBUF,&buffer,sizeof buffer);d2_dual_clients++;epg_viewer(1,1);}}
  if(d2_dual_client<0)return;
- size_t offset=0;while(offset<length){ssize_t n=send(d2_dual_client,(const char *)data+offset,length-offset,MSG_NOSIGNAL);if(n<0&&errno==EINTR)continue;if(n<=0){d2_dual_send_errors++;close(d2_dual_client);d2_dual_client=-1;return;}offset+=(size_t)n;d2_dual_sent+=(unsigned long long)n;}
+ size_t offset=0;while(offset<length){ssize_t n=send(d2_dual_client,(const char *)data+offset,length-offset,MSG_NOSIGNAL);if(n<0&&errno==EINTR)continue;if(n<=0){d2_dual_send_errors++;close(d2_dual_client);d2_dual_client=-1;epg_viewer(1,0);return;}offset+=(size_t)n;d2_dual_sent+=(unsigned long long)n;}
 }
 
 static void *d2_resolve_api(const char *name) { return resolve(name); }
@@ -123,6 +124,7 @@ static void d2_dual_signal_error(int error) {
  pthread_mutex_lock(&d2_dual_lock);d2_dual_state.error=error;d2_dual_state.running=0;pthread_cond_broadcast(&d2_dual_cond);pthread_mutex_unlock(&d2_dual_lock);
 }
 static void d2_dual_save(void) {
+ if(__atomic_load_n(&epg_scan_channel[1],__ATOMIC_SEQ_CST))return;
  FILE *f=fopen("/data/local/tmp/tsd_last_channel_1.new","w");if(!f)return;
  fprintf(f,"%u %u %u\n",d2_dual_state.onid,d2_dual_state.tsid,d2_dual_state.sid);
  int bad=ferror(f);if(fclose(f))bad=1;
@@ -228,7 +230,7 @@ static int d2_dual_capture(void) {
  }
  done:
  // Keep immutable queued ECM frames alive across retries and channel changes.
- if(d2_dual_client>=0){close(d2_dual_client);d2_dual_client=-1;}
+ if(d2_dual_client>=0){close(d2_dual_client);d2_dual_client=-1;epg_viewer(1,0);}
  uint64_t drain_deadline=d2_now_ms()+3000;
  while(__atomic_load_n(&d2_cw_counts[1],__ATOMIC_SEQ_CST)<d2_ecm_issued && d2_now_ms()<drain_deadline)usleep(10000);
  if(cas)DO("tvhdtv_clear_pvr_desc_pids",1,0,0);
@@ -255,11 +257,11 @@ static int d2_dual_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear) {
  uint16_t tuple[]={sid,tsid,onid};uint8_t *program=calloc(1,0x10000),mux[104]={0};if(!program)return 3;
  int result=DO("db_dtv_get_prog_info_by_triplet",program,tuple,0);int16_t muxid;memcpy(&muxid,program+0x65d6,2);free(program);if(result!=1)return 9;
  if(DO("db_dtv_get_mux_info_by_muxid",mux,muxid,0)!=1)return 9;uint32_t frequency;memcpy(&frequency,mux+12,4);if(frequency<400000||frequency>800000)return 9;
- if(d2_dual_listener<0)return 41;d2_dual_stop();
+ if(d2_dual_listener<0)return 41;d2_dual_stop();__atomic_store_n(&epg_scan_channel[1],epg_background(1),__ATOMIC_SEQ_CST);
  pthread_mutex_lock(&d2_dual_lock);memset(&d2_dual_state,0,sizeof d2_dual_state);d2_dual_state.frequency=frequency;d2_dual_state.onid=onid;d2_dual_state.tsid=tsid;d2_dual_state.sid=sid;d2_dual_sent=0;d2_dual_clients=d2_dual_send_errors=0;pthread_mutex_unlock(&d2_dual_lock);
  __atomic_store_n(&d2_dual_stop_flag,0,__ATOMIC_SEQ_CST);if(pthread_create(&d2_dual_worker,NULL,d2_dual_main,NULL))return 3;d2_dual_has_worker=1;
  struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=35;
- pthread_mutex_lock(&d2_dual_lock);int wait=0;while(!d2_dual_state.ready&&!d2_dual_state.error&&!wait)wait=pthread_cond_timedwait(&d2_dual_cond,&d2_dual_lock,&deadline);
- *clear=d2_dual_state.ready;result=*clear?0:(d2_dual_state.error?d2_dual_state.error:23);pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
+ pthread_mutex_lock(&d2_dual_lock);int wait=0;while(!d2_dual_state.ready&&!d2_dual_state.error&&!wait&&!epg_cancelled(1))wait=pthread_cond_timedwait(&d2_dual_cond,&d2_dual_lock,&deadline);
+ *clear=d2_dual_state.ready;result=epg_cancelled(1)?24:(*clear?0:(d2_dual_state.error?d2_dual_state.error:23));pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
 }
 #undef DO

@@ -112,6 +112,7 @@ static uintptr_t parse_arg(const char *t) {
   return (uintptr_t)strtoul(t, NULL, 0);
 }
 
+#include "tsd_epg.inc"
 #include "tsd_dual.inc"
 
 #include "tsd_signal.inc"

@@ -1,4 +1,4 @@
-# スマートフォン接続（TV 0.5.0 / スマホ 0.4.0）
+# スマートフォン接続（TV 0.6.0 / スマホ 0.4.1）
 
 スマホアプリは別リポジトリの[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)で配布しています。
 
