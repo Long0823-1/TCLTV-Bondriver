@@ -90,3 +90,9 @@ TVTestを閉じて新しいAPKでセットアップし、TVを再起動します
 ## Androidスマートフォンで視聴
 
 独立アプリ[TCLTV-Android-Viewer](https://github.com/Long0823-1/TCLTV-Android-Viewer)を使用できます。TVセットアップAPK 0.6.0では、スマホへ確認コードで接続情報・局一覧を渡す機能を追加しました。[接続手順](docs/mobile-pairing.md)を参照してください。
+
+## Support / 開発支援
+
+開発・保守活動をKo-fiで支援できます。
+
+[Ko-fiで支援する](https://ko-fi.com/long0823)
