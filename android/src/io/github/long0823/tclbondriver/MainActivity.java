@@ -25,7 +25,7 @@ public final class MainActivity extends Activity {
   ScrollView scroll=new ScrollView(this);
   LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(48),dp(28),dp(48),dp(28));root.setBackgroundColor(Color.rgb(15,26,34));scroll.addView(root);setContentView(scroll);
   TextView title=text("TCL BonDriver 0.7.0-pre.1",28,Color.WHITE);root.addView(title);
-  root.addView(text("テレビで別のアプリを使いながら、PCで地デジ・BS/CSを選局（衛星実受信は未検証）",16,Color.rgb(180,197,208)));
+  root.addView(text("テレビで別のアプリを使いながら、PCで地デジ・BS/CS・CATV（J:COMなど）を選局（衛星実受信は未検証）",16,Color.rgb(180,197,208)));
   network=text("有線LAN IP：確認中…",22,Color.rgb(125,218,190));network.setTextIsSelectable(true);network.setPadding(0,dp(16),0,0);root.addView(network);
   status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);pairingInfo=text("",28,Color.rgb(125,218,190));pairingInfo.setFocusable(true);pairingInfo.setVisibility(View.GONE);root.addView(pairingInfo);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress);
@@ -41,7 +41,17 @@ public final class MainActivity extends Activity {
    return "チューナー1："+(first?"配信中":"セットアップ後に再起動してください")+"\nチューナー2："+(second?"配信中":"選局待ち（PCの視聴ソフトで選局してください）")+"\n"+output;
   }));
   button(root,"画面消灯中の通信維持を有効にする",()->perform("TCLの常駐許可を設定しています…",()->{TclPolicy.configure(this,true);NetworkService.enable(this,true);return "画面消灯中の通信維持とIPTVを有効にしました。";}));
-  button(root,"CATVトランスモジュレーションをスキャン（数分）",()->perform("CATVをスキャンしています。地デジ端子の同軸を接続したままお待ちください。",()->{String result=CatvCatalog.scan(this,command->root(command,600));NetworkService.reloadCatalog(this);return result+"\nWindowsのセットアップで局一覧を再取得してください。";}));
+  button(root,"CATVをスキャン（約5〜10分・進行状況を表示）",()->perform("CATVをスキャンしています。地デジ端子の同軸を接続したままお待ちください。\nCATVは同軸をTVの「地デジ端子」へ接続します。",()->{
+   java.util.concurrent.atomic.AtomicBoolean scanning=new java.util.concurrent.atomic.AtomicBoolean(true);long started=System.currentTimeMillis();
+   Thread poller=new Thread(()->{while(scanning.get()){try{String[] p=root("cat /data/local/tmp/tsd_catv_progress 2>/dev/null",10).trim().split("\\s+");
+    if(p.length==4){int done=Integer.parseInt(p[0]),total=Integer.parseInt(p[1]);long seconds=(System.currentTimeMillis()-started)/1000;int percent=total>0?done*100/total:0;
+     String eta=done>3?"\n残り約"+Math.max(1,(int)Math.ceil((seconds*(total-done)/(double)done)/60))+"分":"";
+     String head="CATVをスキャンしています… "+percent+"%";String body="周波数 "+(Integer.parseInt(p[2])/1000.0)+" MHz（"+done+"/"+total+"）\nここまでに見つかった番組："+p[3]+"件\n経過 "+(seconds/60)+"分"+(seconds%60)+"秒"+eta+"\nTVの電源を切らないでください。";
+     runOnUiThread(()->{if(!destroyed){status.setText(head);details.setText(body);}});}
+   }catch(Exception ignored){}try{Thread.sleep(3000);}catch(InterruptedException e){return;}}});
+   poller.setDaemon(true);poller.start();
+   String result;try{result=CatvCatalog.scan(this,command->root(command,1500));}finally{scanning.set(false);poller.interrupt();}
+   NetworkService.reloadCatalog(this);return result+"\nWindowsのセットアップで局一覧を再取得してください。\n有料放送は契約がないと映像・音声が出ませんが、局一覧には表示されます。";}));
   button(root,"IPTVのM3U・番組表XMLを表示",this::showIptv);
   root.addView(text("通信維持中は深い待機に入らず消費電力が増えます。AC給電中の自動消灯も抑制しますが、リモコンで画面は消せます。停止時に変更した電源設定を戻します。",14,Color.rgb(180,197,208)));
   button(root,"番組表XMLを今すぐ更新（視聴優先）",()->status.setText(NetworkService.refreshEpg()));

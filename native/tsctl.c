@@ -12,7 +12,7 @@ int main(int argc,char **argv) {
  unsigned tuple[3]={0};if(tune_mode){for(int i=0;i<3;i++){char tail;if(sscanf(argv[i+2],"%u%c",&tuple[i],&tail)!=1||!tuple[i]||tuple[i]>65535)return 2;}}
  if(!strcmp(argv[1],"--tune")&&!tune_mode)return 2;
  int fd=socket(AF_INET,SOCK_STREAM,0);
- struct timeval timeout={.tv_sec=catv_mode?600:(tune_mode?45:5)};
+ struct timeval timeout={.tv_sec=catv_mode?1800:(tune_mode?45:5)};
  setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof timeout);
  setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof timeout);
  struct sockaddr_in sa={.sin_family=AF_INET,.sin_port=htons((status_mode||tune_mode||catv_mode)?40557:40555),.sin_addr.s_addr=htonl(INADDR_LOOPBACK)};

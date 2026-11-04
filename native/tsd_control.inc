@@ -66,7 +66,8 @@ static void *control_client(void *arg) {
  if(count==4 && !strcmp(words[2],"SIGNAL") && (!strcmp(words[3],"0")||!strcmp(words[3],"1"))) {
   control_signal(fd,words[3][0]-'0');
  } else if(count==3 && !strcmp(words[2],"CATVSCAN")) {
-  if(pthread_mutex_trylock(&g_tune1_serial)){out(fd,"ERR busy\n");goto done;}
+  struct timespec wait_until;clock_gettime(CLOCK_REALTIME,&wait_until);wait_until.tv_sec+=240;
+  if(pthread_mutex_timedlock(&g_tune1_serial,&wait_until)){out(fd,"ERR busy\n");goto done;}
   uint16_t onid=0,tsid=0,sid=0;unsigned a,b,c;FILE *saved=fopen("/data/local/tmp/tsd_last_channel_1","r");
   if(saved){if(fscanf(saved,"%u %u %u",&a,&b,&c)==3&&a&&a<=65535&&b&&b<=65535&&c&&c<=65535){onid=a;tsid=b;sid=c;}fclose(saved);}
   epg_external(1);d2_dual_stop();unsigned found=0;int result=catv_scan(&found),restored=0;
