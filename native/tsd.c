@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/time.h>
+#include <time.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -123,6 +124,7 @@ static pthread_mutex_t route_switch_lock=PTHREAD_MUTEX_INITIALIZER;
 #include "tsd_dual.inc"
 
 #include "tsd_control.inc"
+#include "tsd_quiet.inc"
 
 static void handle(int fd, char *line) {
   char *tok[16];
@@ -327,6 +329,7 @@ static void handle(int fd, char *line) {
 static void *serve(void *arg) {
   (void)arg;
   sleep(5);
+  quiet_install();
   pthread_t control_thread;
   if (!pthread_create(&control_thread, NULL, control_server, NULL)) pthread_detach(control_thread);
   for (int i = 0; i < NSCR; i++) scr[i] = calloc(1, SCRSZ);

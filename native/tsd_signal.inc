@@ -10,7 +10,7 @@ static void control_signal(int fd,int index) {
  if(index==0){pthread_mutex_lock(&d0_dual_lock);cable=d0_dual_state.catv.enabled;active=d0_dual_state.running;pthread_mutex_unlock(&d0_dual_lock);}
  else {pthread_mutex_lock(&d2_dual_lock);cable=d2_dual_state.catv.enabled;active=d2_dual_state.running;pthread_mutex_unlock(&d2_dual_lock);}
  if(cable){
-  if(active&&!catv_lock((unsigned)index,&locked)&&locked){int (*cable_cn)(void *,uint32_t *)=resolve("_Z28sony_demod_isdbc_monitor_SNRP12sony_demod_tPi");valid=cable_cn&&!cable_cn(catv_demod((unsigned)index),&cn)&&cn<=100000;if(!valid)cn=0;}
+  if(active&&!catv_lock_any((unsigned)index,&locked)&&locked){int (*cable_cn)(void *,uint32_t *)=resolve("_Z28sony_demod_isdbc_monitor_SNRP12sony_demod_tPi");valid=cable_cn&&!cable_cn(catv_demod((unsigned)index),&cn)&&cn<=100000;if(!valid)cn=0;}
   out(fd,"OK tuner=%d locked=%u cn_valid=%d cn_mdb=%u strength=0 quality=0 system=ISDB-C\n",index,locked,valid,cn);return;
  }
  if(index==1){pthread_mutex_lock(&d2_dual_lock);active=d2_dual_state.running;pthread_mutex_unlock(&d2_dual_lock);}

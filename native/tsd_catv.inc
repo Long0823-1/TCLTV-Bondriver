@@ -28,6 +28,12 @@ static int catv_lock(unsigned tuner,uint8_t *locked){
  uint8_t demod_lock=0,ts_lock=0,unlock=0;*locked=0;if(!demod||!sync)return 9;
  int r=sync(demod,&demod_lock,&ts_lock,&unlock);if(!r)*locked=demod_lock&&ts_lock;return r;
 }
+// Lock for status display: with TSMF stream selection the demodulator lock bit stays 0 while the TS lock is set.
+static int catv_lock_any(unsigned tuner,uint8_t *locked){
+ void *demod=catv_demod(tuner);int (*sync)(void *,uint8_t *,uint8_t *,uint8_t *)=resolve("_Z33sony_demod_isdbc_monitor_SyncStatP12sony_demod_tPhS1_S1_");
+ uint8_t demod_lock=0,ts_lock=0,unlock=0;*locked=0;if(!demod||!sync)return 9;
+ int r=sync(demod,&demod_lock,&ts_lock,&unlock);if(!r)*locked=demod_lock||ts_lock;return r;
+}
 static void catv_stop(unsigned tuner){void *demod=catv_demod(tuner);int (*sleep_fn)(void *)=resolve("_Z16sony_demod_SleepP12sony_demod_t");if(demod&&sleep_fn)sleep_fn(demod);}
 
 static uint64_t catv_now_ms(void){struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);return (uint64_t)ts.tv_sec*1000u+(uint64_t)ts.tv_nsec/1000000u;}
