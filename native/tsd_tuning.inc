@@ -1,6 +1,8 @@
 // The vendor database route is global: serialize both tuner lookups and restore
 // the route before touching capture state. Never keep it selected for playback.
-static int tsd_lookup_channel(int tuner,uint16_t onid,uint16_t tsid,uint16_t sid,uint32_t *frequency,uint32_t *satellite) {
+static int tsd_lookup_channel(int tuner,uint16_t onid,uint16_t tsid,uint16_t sid,uint32_t *frequency,uint32_t *satellite,struct tsd_catv_channel *catv) {
+ int cable=tsd_catv_lookup(onid,tsid,sid,catv);if(cable<0)return 9;
+ if(cable){*frequency=catv->frequency;*satellite=0;return 0;}
  typedef int (*vendor_fn)(uintptr_t,uintptr_t,uintptr_t);
  vendor_fn get_route=(vendor_fn)resolve("db_dtv_get_route"),get_target=(vendor_fn)resolve("db_dtv_get_route_by_onid_tsid"),set_route=(vendor_fn)resolve("db_dtv_set_route"),get_program=(vendor_fn)resolve("db_dtv_get_prog_info_by_triplet"),get_mux=(vendor_fn)resolve("db_dtv_get_mux_info_by_muxid");
  if(!get_route||!get_target||!set_route||!get_program||!get_mux)return 9;

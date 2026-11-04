@@ -117,10 +117,11 @@ static uintptr_t parse_arg(const char *t) {
 static pthread_mutex_t route_switch_lock=PTHREAD_MUTEX_INITIALIZER;
 #include "tsd_epg.inc"
 #include "tsd_tuning.h"
+#include "tsd_catv.h"
+#include "tsd_catv.inc"
 #include "tsd_tuning.inc"
 #include "tsd_dual.inc"
 
-#include "tsd_signal.inc"
 #include "tsd_control.inc"
 
 static void handle(int fd, char *line) {

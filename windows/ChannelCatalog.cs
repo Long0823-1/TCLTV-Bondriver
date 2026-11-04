@@ -10,21 +10,35 @@ namespace TclBonDriverSetup {
  }
  internal static class ChannelCatalog {
   internal const int Maximum=512;
+  internal static List<TvChannel> Parse(string output,string catv) {return Parse(CatvRows(catv)+output);}
+  static string CatvRows(string catalog) {
+   if(catalog==null||catalog.Length>524288)throw new IOException("CATVの局一覧が大きすぎます。");
+   var rows=new StringBuilder();var seen=new HashSet<string>();int index=10000;
+   foreach(string line in catalog.Split('\n')) {
+    if(line.Trim().Length==0||line.StartsWith("#"))continue;
+    Match m=Regex.Match(line.Trim(),@"^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(.+))?$");
+    int onid,tsid,sid,freq,mode,slot;
+    if(!m.Success||!Id(m.Groups[1].Value,out onid)||!Id(m.Groups[2].Value,out tsid)||!Id(m.Groups[3].Value,out sid)||!Int32.TryParse(m.Groups[4].Value,out freq)||freq<90000||freq>770000||!Int32.TryParse(m.Groups[5].Value,out mode)||mode<0||mode>2||!Int32.TryParse(m.Groups[6].Value,out slot)||slot<1||slot>15)throw new IOException("CATVの局一覧が不正です。TVアプリでスキャンしてください。");
+    string key=onid+":"+tsid+":"+sid;if(!seen.Add(key)||seen.Count>Maximum)throw new IOException("CATVの局一覧が重複または上限超過です。");
+    string name=m.Groups[7].Value.Trim();if(name.Length==0||name.StartsWith("arib:"))name="CATV "+sid;if(name.Length>200||name.IndexOf('\0')>=0)throw new IOException("CATVの局名が不正です。");
+    rows.Append("Row: ").Append(index++).Append(" display_number=").Append(sid).Append(", original_network_id=").Append(onid).Append(", transport_stream_id=").Append(tsid).Append(", service_id=").Append(sid).Append(", type=TYPE_ISDB_C, service_type=SERVICE_TYPE_AUDIO_VIDEO, browsable=1, display_name=").Append(name).Append('\n');
+   }return rows.ToString();
+  }
   internal static List<TvChannel> Parse(string output) {
    if(output==null||output.Length>2097152)throw new IOException("チャンネル情報が大きすぎます。");
    var channels=new List<TvChannel>();var seen=new HashSet<string>(StringComparer.Ordinal);
    string pattern=@"(?m)^Row: \d+ display_number=([^,\r\n]*), original_network_id=(\d+), transport_stream_id=(\d+), service_id=(\d+), type=([^,\r\n]+), service_type=([^,\r\n]+), browsable=([01]), display_name=([^\r\n]*)\r?$";
    foreach(Match m in Regex.Matches(output,pattern)) {
     string system=m.Groups[5].Value;
-    if((system!="TYPE_ISDB_T"&&system!="TYPE_ISDB_S")||m.Groups[7].Value!="1")continue;
+    if((system!="TYPE_ISDB_T"&&system!="TYPE_ISDB_S"&&system!="TYPE_ISDB_C")||m.Groups[7].Value!="1")continue;
     string kind=m.Groups[6].Value;if(kind!="EN_TCL_DTV"&&kind!="SERVICE_TYPE_AUDIO_VIDEO")continue;
     int onid,tsid,sid;if(!Id(m.Groups[2].Value,out onid)||!Id(m.Groups[3].Value,out tsid)||!Id(m.Groups[4].Value,out sid))throw new IOException("TVのチャンネルIDが不正です。TV側で再スキャンしてください。");
     string number=m.Groups[1].Value.Trim(),name=m.Groups[8].Value.Trim();
     if(number=="NULL")number="";
     if(name.Length==0||name=="NULL"||name.Length>200||number.Length>32||name.IndexOf('\0')>=0||number.IndexOf('\0')>=0)throw new IOException("TVのチャンネル名を確認できません。");
-    string key=system+":"+onid+":"+tsid+":"+sid;if(!seen.Add(key))continue;
+    string key=onid+":"+tsid+":"+sid;if(!seen.Add(key))continue;
     if(channels.Count==Maximum)throw new IOException("地上波とBS/CSの登録数が上限512を超えています。");
-    channels.Add(new TvChannel{Number=number,Name=name,System=system=="TYPE_ISDB_S"?"ISDB-S":"ISDB-T",Onid=onid,Tsid=tsid,Sid=sid});
+    channels.Add(new TvChannel{Number=number,Name=name,System=system=="TYPE_ISDB_C"?"ISDB-C":system=="TYPE_ISDB_S"?"ISDB-S":"ISDB-T",Onid=onid,Tsid=tsid,Sid=sid});
    }
    channels.Sort((a,b)=>{int c=(a.System=="ISDB-T"?0:1).CompareTo(b.System=="ISDB-T"?0:1);if(c!=0)return c;int x,y;if(!Int32.TryParse(a.Number,out x))x=Int32.MaxValue;if(!Int32.TryParse(b.Number,out y))y=Int32.MaxValue;c=x.CompareTo(y);if(c!=0)return c;c=StringComparer.Ordinal.Compare(a.Name,b.Name);if(c!=0)return c;return StringComparer.Ordinal.Compare(a.Command,b.Command);});
    if(channels.Count==0)throw new IOException("TVに表示対象の地上波またはBS/CSチャンネルがありません。TV本体でチャンネルスキャンを完了してから再実行してください。既存設定は変更していません。");
@@ -43,7 +57,7 @@ namespace TclBonDriverSetup {
    Match section=Regex.Match(text,@"(?ms)^\[Channel0\]\r?\n(.*?)(?=^\[|\z)");if(!section.Success)throw new IOException("接続設定を更新してチャンネル一覧を取得してください。");
    var c=new TvChannel();string[] keys={"ONID","TSID","ServiceID"};int[] ids=new int[3];
    for(int i=0;i<keys.Length;i++){Match m=Regex.Match(section.Groups[1].Value,@"(?m)^"+keys[i]+@"=(\d+)\r?$");if(!m.Success||!Id(m.Groups[1].Value,out ids[i]))throw new IOException("チャンネル設定が不正です。接続設定を再作成してください。");}
-   c.Onid=ids[0];c.Tsid=ids[1];c.Sid=ids[2];Match system=Regex.Match(section.Groups[1].Value,@"(?m)^System=(ISDB-[TS])\r?$");c.System=system.Success?system.Groups[1].Value:"ISDB-T";return c;
+   c.Onid=ids[0];c.Tsid=ids[1];c.Sid=ids[2];Match system=Regex.Match(section.Groups[1].Value,@"(?m)^System=(ISDB-[TSC])\r?$");c.System=system.Success?system.Groups[1].Value:"ISDB-T";return c;
   }
  }
 }

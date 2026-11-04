@@ -10,6 +10,8 @@ static int g_control_listening,g_control_clients;
 static struct {uint16_t selected[3];} g_control;
 #include "tsd_primary_cas.inc"
 #include "tsd_record_primary.inc"
+#include "tsd_signal.inc"
+#include "tsd_catv_scan.inc"
 
 static void epg_wake(int tuner){pthread_mutex_t *lock=tuner?&d2_dual_lock:&d0_dual_lock;pthread_cond_t *cond=tuner?&d2_dual_cond:&d0_dual_cond;pthread_mutex_lock(lock);pthread_cond_broadcast(cond);pthread_mutex_unlock(lock);}
 static void *epg_watch(void *unused){(void)unused;pthread_mutex_lock(&epg_lock);epg_slots[0].hold=epg_slots[1].hold=epg_ms()+60000;pthread_mutex_unlock(&epg_lock);for(;;){int listeners[2]={d0_dual_listener,d2_dual_listener};for(int t=0;t<2;t++){if(listeners[t]<0)continue;struct pollfd p={.fd=listeners[t],.events=POLLIN};if(poll(&p,1,0)>0&&(p.revents&POLLIN))epg_external(t);}usleep(100000);}return NULL;}
@@ -63,6 +65,15 @@ static void *control_client(void *arg) {
  if(count<3 || strcmp(words[0],"AUTH") || !control_authenticated(words[1])) { out(fd,"ERR authentication\n"); goto done; }
  if(count==4 && !strcmp(words[2],"SIGNAL") && (!strcmp(words[3],"0")||!strcmp(words[3],"1"))) {
   control_signal(fd,words[3][0]-'0');
+ } else if(count==3 && !strcmp(words[2],"CATVSCAN")) {
+  if(pthread_mutex_trylock(&g_tune1_serial)){out(fd,"ERR busy\n");goto done;}
+  uint16_t onid=0,tsid=0,sid=0;unsigned a,b,c;FILE *saved=fopen("/data/local/tmp/tsd_last_channel_1","r");
+  if(saved){if(fscanf(saved,"%u %u %u",&a,&b,&c)==3&&a&&a<=65535&&b&&b<=65535&&c&&c<=65535){onid=a;tsid=b;sid=c;}fclose(saved);}
+  epg_external(1);d2_dual_stop();unsigned found=0;int result=catv_scan(&found),restored=0;
+  if(onid){int clear=0;restored=d2_dual_tune(onid,tsid,sid,&clear);}
+  if(result)out(fd,"ERR catv_scan=%d previous_catalog_preserved=1 restore=%d\n",result,restored);
+  else out(fd,"OK catv_channels=%u restore=%d\n",found,restored);
+  pthread_mutex_unlock(&g_tune1_serial);
  } else if(count==3 && !strcmp(words[2],"STATUS")) {
   pthread_mutex_lock(&d0_dual_lock);
   int running=d0_dual_state.running,error=d0_dual_state.error;

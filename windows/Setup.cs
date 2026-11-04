@@ -82,7 +82,8 @@ namespace TclBonDriverSetup {
    string serial=Device(),server=Server(serial);Note("TVの接続設定を取得しています…");string token=Adb("-s "+Q(serial)+" shell su -c 'cat /data/local/tmp/tsd_token'",20).Trim();if(!Regex.IsMatch(token,@"\A[0-9a-fA-F]{64}\z"))throw new IOException("接続キーを取得できません。TVのセットアップと、ADBへのroot許可を確認してください。");string status=Control(server,token,"STATUS");if(!status.StartsWith("OK "))throw new IOException("TVとの認証に失敗しました。");
    Note("TV本体のスキャン結果から地上波・BS・CSの局一覧を取得しています…");
    string rows=Adb("-s "+Q(serial)+" shell su -c 'content query --uri content://android.media.tv/channel --projection display_number:original_network_id:transport_stream_id:service_id:type:service_type:browsable:display_name'",30);
-   var channels=ChannelCatalog.Parse(rows);string catalog=ChannelCatalog.Ini(channels);
+   string catv=Adb("-s "+Q(serial)+" shell su -c 'if [ -f /data/local/tmp/tsd_catv_channels ]; then cat /data/local/tmp/tsd_catv_channels; fi'",20);
+   var channels=ChannelCatalog.Parse(rows,catv);string catalog=ChannelCatalog.Ini(channels);
    Note("地上波・BS/CS "+channels.Count+"サービスを取得しました（非表示・データ専用サービスは対象外）。");
    int count=UseDual()?2:1;if(count==2&&!Regex.IsMatch(status,@"(?:^| )tuners=2(?: |$)"))throw new IOException("TV側の2チューナー対応サービスを確認できません。APKを更新してセットアップ・再起動してください。");
    for(int index=0;index<count;index++) {

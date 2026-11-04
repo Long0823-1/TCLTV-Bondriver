@@ -1,5 +1,9 @@
 # TCLTV-Bondriver
 
+## CATVトランスモジュレーション対応（0.7.0-pre.2）
+
+地デジ端子へ接続したCATVの64QAM／256QAM（ISDB-C）を受信できます。TV用APKのCATVスキャンで局を登録し、Windows側で局一覧とDLLを更新してください。TVTestにはCATV専用の選局空間を追加しています。[手順・実機検証範囲](docs/CATV.md)
+
 ## BS/110度CS対応プレリリース
 
 **v0.7.0-pre.1 は地デジ・BS・110度CSの3波対応を追加したプレリリースです。**

@@ -46,7 +46,7 @@ static pthread_t d0_dual_worker;
 static int d0_dual_has_worker,d0_dual_stop_flag;
 static int d0_soft_ok;
 static struct {
- uint32_t frequency,satellite_id;uint16_t onid,tsid,sid,pmt;
+ uint32_t frequency,satellite_id;struct tsd_catv_channel catv;uint16_t onid,tsid,sid,pmt;
  int running,ready,error,phase,parsed,video_clear,audio_clear;
  uint64_t bytes,sent;unsigned sync_errors,cc_errors,tei,ecm_errors;
  struct tsd_service_pids service;
@@ -96,9 +96,9 @@ static int d0_dual_capture(void) {
  struct d0_allocation memory={0};strcpy(memory.tag,"tsr_down");memory.size=0x200000;memory.mode=1;
  uint8_t data[48128],last_cc[8192];memset(last_cc,255,sizeof last_cc);
  result=d2_record_init();if(result){DIAG("D0 stage=record_init result=%d",result);goto done;}
- result=DO("fpi_demod_start_connect",cfg,0,0);if(result){DIAG("D0 stage=demod_start system=%u frequency=%u satellite=%u result=%d",cfg[1],cfg[2],cfg[4],result);goto done;}tuned=1;
+ result=d0_dual_state.catv.enabled?catv_start(0,&d0_dual_state.catv):DO("fpi_demod_start_connect",cfg,0,0);if(result){DIAG("D0 stage=demod_start system=%u frequency=%u satellite=%u result=%d",cfg[1],cfg[2],cfg[4],result);goto done;}tuned=1;
  uint64_t deadline=d0_now_ms()+(d0_dual_state.satellite_id?5000:10000),last_data=d0_now_ms();uint8_t locked=0;
- do {if(d0_dual_stopping())goto done;DO("fpi_demod_get_lock_status",0,&locked,0);if(locked)break;d0_dual_keepalive();usleep(50000);}while(d0_now_ms()<deadline);
+ do {if(d0_dual_stopping())goto done;if(d0_dual_state.catv.enabled)catv_lock(0,&locked);else DO("fpi_demod_get_lock_status",0,&locked,0);if(locked)break;d0_dual_keepalive();usleep(50000);}while(d0_now_ms()<deadline);
  if(!locked){result=20;DIAG("D0 stage=demod_lock result=%d",result);goto done;}
  result=DO("mif_demux_get_path_params",0,saved,0);if(result){DIAG("D0 stage=demux_get_path result=%d",result);goto done;}
  tsio=saved[0];source=saved[1];if((tsio>>24)!=0xab||(source>>24)!=0xae){result=43;goto done;}
@@ -172,7 +172,7 @@ static int d0_dual_capture(void) {
  if(mapped)DO("mif_demux_set_path_params",0,saved[0],saved[1]);
  if(record){DO("MI_TSR_Stop",record,0,0);DO("MI_TSR_Close",record,0,0);}
  if(allocated){struct {uint64_t physical;uint32_t size;} release={memory.physical,memory.size};DO("MI_OS_FreeIommuMemory",&release,0,0);}
- if(tuned)DO("fpi_demod_stop_connect",0,0,0);
+ if(tuned){if(d0_dual_state.catv.enabled)catv_stop(0);else DO("fpi_demod_stop_connect",0,0,0);}
  return result;
 }
 static void *d0_dual_main(void *unused) {
@@ -188,9 +188,9 @@ static void d0_dual_stop(void) {
  __atomic_store_n(&d0_dual_stop_flag,1,__ATOMIC_SEQ_CST);if(d0_dual_has_worker){pthread_join(d0_dual_worker,NULL);d0_dual_has_worker=0;}
 }
 static int d0_dual_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear) {
- uint32_t frequency=0,satellite=0;int result=tsd_lookup_channel(0,onid,tsid,sid,&frequency,&satellite);if(result)return result;
+ uint32_t frequency=0,satellite=0;struct tsd_catv_channel catv;int result=tsd_lookup_channel(0,onid,tsid,sid,&frequency,&satellite,&catv);if(result)return result;
  if(d0_dual_listener<0)return 41;d0_dual_stop();__atomic_store_n(&epg_scan_channel[0],epg_background(0),__ATOMIC_SEQ_CST);
- pthread_mutex_lock(&d0_dual_lock);memset(&d0_dual_state,0,sizeof d0_dual_state);d0_soft_ok=0;d0_dual_state.frequency=frequency;d0_dual_state.satellite_id=satellite;d0_dual_state.onid=onid;d0_dual_state.tsid=tsid;d0_dual_state.sid=sid;d0_dual_sent=0;d0_dual_clients=d0_dual_send_errors=0;pthread_mutex_unlock(&d0_dual_lock);
+ pthread_mutex_lock(&d0_dual_lock);memset(&d0_dual_state,0,sizeof d0_dual_state);d0_soft_ok=0;d0_dual_state.frequency=frequency;d0_dual_state.satellite_id=satellite;d0_dual_state.catv=catv;d0_dual_state.onid=onid;d0_dual_state.tsid=tsid;d0_dual_state.sid=sid;d0_dual_sent=0;d0_dual_clients=d0_dual_send_errors=0;pthread_mutex_unlock(&d0_dual_lock);
  __atomic_store_n(&d0_dual_stop_flag,0,__ATOMIC_SEQ_CST);if(pthread_create(&d0_dual_worker,NULL,d0_dual_main,NULL))return 3;d0_dual_has_worker=1;
  struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=35;
  pthread_mutex_lock(&d0_dual_lock);int wait=0;while(!d0_dual_state.ready&&!d0_dual_state.error&&!wait&&!epg_cancelled(0))wait=pthread_cond_timedwait(&d0_dual_cond,&d0_dual_lock,&deadline);

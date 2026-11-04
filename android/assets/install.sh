@@ -10,6 +10,7 @@ check_hash() {
 check_hash /vendor/tvos/libBionic/libfpp.so e31b65a665f9d7cd8c68a882bc23e9213c40ac30d388222bdd7a6c421b7c907b
 check_hash /vendor/tvos/libBionic/libisdb.so f389445d2868bd091f842175592f77539480b2a6357ecc143a276149efe1a215
 check_hash /vendor/lib/libmi3.so 05b6276bdc96e6ae769e0ce4f4a99e77a2181f964fddeb414c0f0770679b9aa6
+check_hash /vendor/tvos/bin/sitatvservice 6af4fd670b7d33fd4ed4dd10e00226d50498642343004912d2f46e943e142601
 if grep -q 'LD_PRELOAD=' /vendor/tvos/bin/run.sh && ! grep -q 'LD_PRELOAD=/data/local/tmp/libtsd.so' /vendor/tvos/bin/run.sh; then
  echo '既存の起動設定を確認してください。';exit 11
 fi

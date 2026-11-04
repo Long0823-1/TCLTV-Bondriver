@@ -41,6 +41,7 @@ public final class MainActivity extends Activity {
    return "チューナー1："+(first?"配信中":"セットアップ後に再起動してください")+"\nチューナー2："+(second?"配信中":"選局待ち（PCの視聴ソフトで選局してください）")+"\n"+output;
   }));
   button(root,"画面消灯中の通信維持を有効にする",()->perform("TCLの常駐許可を設定しています…",()->{TclPolicy.configure(this,true);NetworkService.enable(this,true);return "画面消灯中の通信維持とIPTVを有効にしました。";}));
+  button(root,"CATVトランスモジュレーションをスキャン（数分）",()->perform("CATVをスキャンしています。地デジ端子の同軸を接続したままお待ちください。",()->{String result=CatvCatalog.scan(this,command->root(command,600));NetworkService.reloadCatalog(this);return result+"\nWindowsのセットアップで局一覧を再取得してください。";}));
   button(root,"IPTVのM3U・番組表XMLを表示",this::showIptv);
   root.addView(text("通信維持中は深い待機に入らず消費電力が増えます。AC給電中の自動消灯も抑制しますが、リモコンで画面は消せます。停止時に変更した電源設定を戻します。",14,Color.rgb(180,197,208)));
   button(root,"番組表XMLを今すぐ更新（視聴優先）",()->status.setText(NetworkService.refreshEpg()));
