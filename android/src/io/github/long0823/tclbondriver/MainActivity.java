@@ -24,8 +24,8 @@ public final class MainActivity extends Activity {
   super.onCreate(saved);
   ScrollView scroll=new ScrollView(this);
   LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(48),dp(28),dp(48),dp(28));root.setBackgroundColor(Color.rgb(15,26,34));scroll.addView(root);setContentView(scroll);
-  TextView title=text("TCL BonDriver 0.6.0",28,Color.WHITE);root.addView(title);
-  root.addView(text("テレビで別のアプリを使いながら、PCで異なる地デジ2局を同時受信",16,Color.rgb(180,197,208)));
+  TextView title=text("TCL BonDriver 0.7.0-pre.1",28,Color.WHITE);root.addView(title);
+  root.addView(text("テレビで別のアプリを使いながら、PCで地デジ・BS/CSを選局（衛星実受信は未検証）",16,Color.rgb(180,197,208)));
   network=text("有線LAN IP：確認中…",22,Color.rgb(125,218,190));network.setTextIsSelectable(true);network.setPadding(0,dp(16),0,0);root.addView(network);
   status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);pairingInfo=text("",28,Color.rgb(125,218,190));pairingInfo.setFocusable(true);pairingInfo.setVisibility(View.GONE);root.addView(pairingInfo);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress);

@@ -80,10 +80,10 @@ namespace TclBonDriverSetup {
   void Pair() {
    string folder=ReadText(destination);if(folder.Length==0||!Directory.Exists(folder))throw new IOException("TVTestのフォルダーを選択してください。");string tvtest=Path.Combine(folder,"TVTest.exe");if(!File.Exists(tvtest))throw new IOException("選択先にTVTest.exeがありません。");bool x64=Is64BitPe(tvtest);string source=Path.Combine(root,x64?"x64":"x86","BonDriver_TCLG06.dll");if(!File.Exists(source))throw new FileNotFoundException("配布ZIPに対応するDLLがありません。");
    string serial=Device(),server=Server(serial);Note("TVの接続設定を取得しています…");string token=Adb("-s "+Q(serial)+" shell su -c 'cat /data/local/tmp/tsd_token'",20).Trim();if(!Regex.IsMatch(token,@"\A[0-9a-fA-F]{64}\z"))throw new IOException("接続キーを取得できません。TVのセットアップと、ADBへのroot許可を確認してください。");string status=Control(server,token,"STATUS");if(!status.StartsWith("OK "))throw new IOException("TVとの認証に失敗しました。");
-   Note("TV本体のスキャン結果から地デジの局一覧を取得しています…");
+   Note("TV本体のスキャン結果から地上波・BS・CSの局一覧を取得しています…");
    string rows=Adb("-s "+Q(serial)+" shell su -c 'content query --uri content://android.media.tv/channel --projection display_number:original_network_id:transport_stream_id:service_id:type:service_type:browsable:display_name'",30);
    var channels=ChannelCatalog.Parse(rows);string catalog=ChannelCatalog.Ini(channels);
-   Note("地デジ "+channels.Count+"サービスを取得しました（TVで非表示の局・BS/CS・データ専用サービスは対象外）。");
+   Note("地上波・BS/CS "+channels.Count+"サービスを取得しました（非表示・データ専用サービスは対象外）。");
    int count=UseDual()?2:1;if(count==2&&!Regex.IsMatch(status,@"(?:^| )tuners=2(?: |$)"))throw new IOException("TV側の2チューナー対応サービスを確認できません。APKを更新してセットアップ・再起動してください。");
    for(int index=0;index<count;index++) {
     string name=index==0?"BonDriver_TCLG06":"BonDriver_TCLG06_1";

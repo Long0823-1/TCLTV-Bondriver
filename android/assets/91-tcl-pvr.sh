@@ -1,9 +1,11 @@
 #!/system/bin/sh
 # Magisk late-start service. Restore the native tuner without opening a TV app.
-# Select only a visible terrestrial AV service from this TV's scan results.
+# Select a visible terrestrial or satellite AV service from this TV's scan results.
 first_scanned_tuple() {
- content query --uri content://android.media.tv/channel --projection original_network_id:transport_stream_id:service_id:type:service_type:browsable 2>/dev/null |
- grep -E 'type=TYPE_ISDB_T, service_type=(EN_TCL_DTV|SERVICE_TYPE_AUDIO_VIDEO), browsable=1$' |
+ rows=$(content query --uri content://android.media.tv/channel --projection original_network_id:transport_stream_id:service_id:type:service_type:browsable 2>/dev/null)
+ # Prefer terrestrial at first boot; satellite is a fallback for satellite-only catalogs.
+ { printf '%s\n' "$rows" | grep -E 'type=TYPE_ISDB_T, service_type=(EN_TCL_DTV|SERVICE_TYPE_AUDIO_VIDEO), browsable=1$';
+   printf '%s\n' "$rows" | grep -E 'type=TYPE_ISDB_S, service_type=(EN_TCL_DTV|SERVICE_TYPE_AUDIO_VIDEO), browsable=1$'; } |
  sed -n 's/^Row: [0-9][0-9]* original_network_id=\([0-9][0-9]*\), transport_stream_id=\([0-9][0-9]*\), service_id=\([0-9][0-9]*\),.*$/\1 \2 \3/p' |
  while read -r onid tsid sid; do
   [ "$onid" -ge 1 ] && [ "$onid" -le 65535 ] && [ "$tsid" -ge 1 ] && [ "$tsid" -le 65535 ] && [ "$sid" -ge 1 ] && [ "$sid" -le 65535 ] || continue
@@ -49,8 +51,14 @@ if [ -r /data/local/tmp/tsd_last_record_channel_0 ];then
 fi
 valid_id() { case "$1" in ''|*[!0-9]*) return 1;;esac;[ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
 if ! valid_id "$onid" || ! valid_id "$tsid" || ! valid_id "$sid";then
- tuple=$(first_scanned_tuple)
- [ "${#tuple}" -eq 12 ] || { echo 'Scan terrestrial channels on the TV first.';exit 2; }
+ # The TV provider can become ready after sys.boot_completed on a clean install.
+ tuple=;attempt=0
+ while [ "${#tuple}" -ne 12 ];do
+  tuple=$(first_scanned_tuple)
+  [ "${#tuple}" -eq 12 ] && break
+  attempt=$((attempt+1));[ "$attempt" -ge 30 ] && { echo 'Scan terrestrial or BS/CS channels on the TV first.';exit 2; }
+  sleep 2
+ done
  u16hex() { printf '%d' "0x$(printf '%s' "$1" | cut -c3-4)$(printf '%s' "$1" | cut -c1-2)"; }
  sid=$(u16hex "$(printf '%s' "$tuple" | cut -c1-4)")
  tsid=$(u16hex "$(printf '%s' "$tuple" | cut -c5-8)")

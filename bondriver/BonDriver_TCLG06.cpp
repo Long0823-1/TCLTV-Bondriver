@@ -15,7 +15,7 @@
 static HMODULE g_module;
 static constexpr DWORD Chunk = 188 * 256;
 static constexpr size_t MaxBlocks = (32 * 1024 * 1024) / Chunk;
-struct Channel { std::wstring name; DWORD onid, tsid, service; };
+struct Channel { std::wstring name; DWORD onid, tsid, service, space; };
 
 class Driver final : public IBonDriver2 {
  std::atomic<SOCKET> sock{INVALID_SOCKET};
@@ -27,12 +27,14 @@ class Driver final : public IBonDriver2 {
  std::atomic<bool> opened{false};
  bool winsock = false;
  std::atomic<DWORD> current{0xffffffff};
+ std::atomic<DWORD> currentSpace{0xffffffff}, currentSpaceChannel{0xffffffff};
  char host[256] = "169.254.95.200";
  int port = 40556, controlPort = 40557, tunerIndex = 0;
  bool helperMode = false;
  char token[128] = {};
  std::wstring ini, script, python, adbSerial;
  std::vector<Channel> channels;
+ std::vector<DWORD> tuningSpaces[2];
  std::deque<std::vector<BYTE>> queue;
  std::vector<BYTE> output;
  static unsigned __stdcall Receive(void *p) { static_cast<Driver *>(p)->ReceiveLoop(); return 0; }
@@ -59,13 +61,13 @@ public:
  const BOOL GetTsStream(BYTE **,DWORD *,DWORD *) override;
  void PurgeTsStream() override;
  void Release() override { delete this; }
- LPCWSTR GetTunerName() override { return tunerIndex==1?L"TCL G06 ISDB-T #2":L"TCL G06 ISDB-T #1"; }
+ LPCWSTR GetTunerName() override { return tunerIndex==1?L"TCL G06 ISDB-T/S #2":L"TCL G06 ISDB-T/S #1"; }
  const BOOL IsTunerOpening() override { return opened ? TRUE : FALSE; }
- LPCWSTR EnumTuningSpace(DWORD space) override { return space==0 ? L"Terrestrial ISDB-T" : nullptr; }
- LPCWSTR EnumChannelName(DWORD space,DWORD channel) override { return space==0 && channel<channels.size() ? channels[channel].name.c_str() : nullptr; }
+ LPCWSTR EnumTuningSpace(DWORD space) override { if(space>1)return nullptr;return space==0?L"Terrestrial ISDB-T":L"Satellite BS/CS ISDB-S"; }
+ LPCWSTR EnumChannelName(DWORD space,DWORD channel) override { return space<2&&channel<tuningSpaces[space].size()?channels[tuningSpaces[space][channel]].name.c_str():nullptr; }
  const BOOL SetChannel(DWORD space,DWORD channel) override;
- const DWORD GetCurSpace() override { return current==0xffffffff ? 0xffffffff : 0; }
- const DWORD GetCurChannel() override { return current; }
+ const DWORD GetCurSpace() override { return currentSpace; }
+ const DWORD GetCurChannel() override { return currentSpaceChannel; }
 };
 
 void Driver::LoadSettings() {
@@ -99,13 +101,16 @@ void Driver::LoadChannels() {
  UINT count=GetPrivateProfileIntW(L"Channels",L"Count",0,ini.c_str());if(!count||count>512)return;
  std::vector<Channel> loaded;loaded.reserve(count);
  for(UINT i=0;i<count;i++) {
-  wchar_t section[32],name[512];swprintf_s(section,L"Channel%u",i);Channel channel{};
+  wchar_t section[32],name[512],system[32];swprintf_s(section,L"Channel%u",i);Channel channel{};
   DWORD length=GetPrivateProfileStringW(section,L"Name",L"",name,_countof(name),ini.c_str());
   if(!length||length>=_countof(name)-1||!ChannelNumber(ini,section,L"ONID",channel.onid)||!ChannelNumber(ini,section,L"TSID",channel.tsid)||!ChannelNumber(ini,section,L"ServiceID",channel.service))return;
-  for(const auto &previous:loaded)if(previous.onid==channel.onid&&previous.tsid==channel.tsid&&previous.service==channel.service)return;
+  GetPrivateProfileStringW(section,L"System",L"ISDB-T",system,_countof(system),ini.c_str());
+  if(!_wcsicmp(system,L"ISDB-T"))channel.space=0;else if(!_wcsicmp(system,L"ISDB-S"))channel.space=1;else return;
+  for(const auto &previous:loaded)if(previous.space==channel.space&&previous.onid==channel.onid&&previous.tsid==channel.tsid&&previous.service==channel.service)return;
   channel.name=name;loaded.push_back(std::move(channel));
  }
  channels.swap(loaded);
+ for(DWORD i=0;i<channels.size();++i)tuningSpaces[channels[i].space].push_back(i);
 }
 const BOOL Driver::OpenTuner() {
  if(opened) return TRUE;
@@ -188,7 +193,7 @@ void Driver::Disconnect() {
 }
 
 void Driver::CloseTuner() {
- StopSignal();Disconnect(); opened=false; current=0xffffffff;
+ StopSignal();Disconnect(); opened=false; current=0xffffffff;currentSpace=0xffffffff;currentSpaceChannel=0xffffffff;
  PurgeTsStream();
  if(winsock) { WSACleanup(); winsock=false; }
  if(tunerMutex) { CloseHandle(tunerMutex); tunerMutex=nullptr; }
@@ -277,7 +282,7 @@ void Driver::PurgeTsStream() {
 }
 bool Driver::TuneWithHelper(DWORD index) {
  const Channel &channel=channels[index];
- if(channel.onid!=channel.tsid)return false;
+ if(channel.space!=0||channel.onid!=channel.tsid)return false;
  wchar_t numbers[128]; swprintf_s(numbers,L" --triplet %lu --service %lu",channel.tsid,channel.service);
  std::wstring command=L"\""+python+L"\" \""+script+L"\" --host ";
  wchar_t widehost[256]; MultiByteToWideChar(CP_UTF8,0,host,-1,widehost,_countof(widehost));
@@ -330,12 +335,13 @@ bool Driver::Tune(DWORD index) {
  return used>=3 && response[used-1]=='\n' && strncmp(response,"OK ",3)==0;
 }
 const BOOL Driver::SetChannel(DWORD space,DWORD channel) {
- if(!opened || space!=0 || channel>=channels.size()) return FALSE;
- if(current==channel && connected) return TRUE;
+ if(!opened || space>1 || channel>=tuningSpaces[space].size()) return FALSE;
+ DWORD index=tuningSpaces[space][channel];
+ if(current==index && connected) return TRUE;
  Disconnect(); PurgeTsStream();
- if(!Tune(channel)) { current=0xffffffff; Connect(); return FALSE; }
- if(!Connect()) { current=0xffffffff; return FALSE; }
- current=channel; return TRUE;
+ if(!Tune(index)) { current=0xffffffff;currentSpace=0xffffffff;currentSpaceChannel=0xffffffff;Connect(); return FALSE; }
+ if(!Connect()) { current=0xffffffff;currentSpace=0xffffffff;currentSpaceChannel=0xffffffff; return FALSE; }
+ current=index;currentSpace=space;currentSpaceChannel=channel; return TRUE;
 }
 BOOL APIENTRY DllMain(HMODULE module,DWORD reason,LPVOID) {
  if(reason==DLL_PROCESS_ATTACH) { g_module=module; DisableThreadLibraryCalls(module); }

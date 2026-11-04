@@ -1,5 +1,25 @@
 # TCLTV-Bondriver
 
+## BS/110度CS対応プレリリース
+
+**v0.7.0-pre.1 は地デジ・BS・110度CSの3波対応を追加したプレリリースです。**
+[ダウンロード](https://github.com/Long0823-1/TCLTV-Bondriver/releases/tag/v0.7.0-pre.1)
+
+[2m3k/TCLTV-Bondriver-3wave](https://github.com/2m3k/TCLTV-Bondriver-3wave)
+の衛星選局・DBルート切り替え・チャンネルカタログ・BonDriver選局空間を基に移植しました。
+アプリのパッケージ名は従来の `io.github.long0823.tclbondriver` を維持しています。
+
+- TV本体で受信できる環境と、TV本体の地デジ・BS/CSスキャン結果を使用します。BS/CSアンテナと有効なB-CASカードが必要です。
+- Windowsセットアップで局一覧を再取得し、新しいx86/x64 DLLを配置して、TVTestで「Terrestrial ISDB-T」「Satellite BS/CS ISDB-S」をスキャンしてください。
+- 地デジ用の既存INIは `System` 省略時に地デジとして読み込みます。衛星局は `System=ISDB-S` を保存します。
+- BS/CSも2チューナーの選局対象です。未契約局は選局・スキャンできても映像を復号できません。4K/8K放送は対象外です。
+- TV APKのXMLTV自動巡回では衛星局への選局を行いません（フォークで報告された視聴との競合を回避）。視聴中のEIT受信は継続します。
+- **当方のTVにはBS/CSアンテナがないため、BS/CSの実受信・地上波との混在同時受信は未検証です。** フォーク側の動作報告と、選局パラメーター・DB復元・局一覧・DLL列挙の自動試験を基にした開発版です。
+- **今回のBonDriver APKは署名鍵が旧公開版と異なります。** 旧APKをアンインストールしてから導入してください。APKの削除だけでは配信本体は削除されません。導入前へ戻す場合は先に旧APKの復元操作を実行してください。接続キー入りINIは公開しないでください。
+
+[3波対応の構成・検証範囲](docs/THREE_WAVE.md)
+
+
 ## Magisk適用済みbootイメージの公開（2026-10-27）
 
 TCL 32S5400（G06 / MT5867）向けの **Magisk 25.2（25200）適用済みboot.img** を、別リポジトリで公開しました。ユーザーによる実機起動試験で正常動作を確認しています。

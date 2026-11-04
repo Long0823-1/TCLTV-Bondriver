@@ -10,4 +10,5 @@ Token=REPLACE_WITH_YOUR_DEVICE_TOKEN
 [Channels]
 ; Populated from the TV scan results by the Windows setup tool.
 ; No regional fallback presets are included.
+; Each [ChannelN] stores System=ISDB-T or System=ISDB-S.
 Count=0

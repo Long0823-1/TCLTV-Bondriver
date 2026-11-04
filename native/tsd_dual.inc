@@ -89,7 +89,7 @@ static pthread_cond_t d2_dual_cond=PTHREAD_COND_INITIALIZER;
 static pthread_t d2_dual_worker;
 static int d2_dual_has_worker,d2_dual_stop_flag;
 static struct {
- uint32_t frequency;uint16_t onid,tsid,sid,pmt;
+ uint32_t frequency,satellite_id;uint16_t onid,tsid,sid,pmt;
  int running,ready,error,phase,parsed,video_clear,audio_clear;
  uint64_t bytes,sent;unsigned sync_errors,cc_errors,tei,ecm_errors;
  struct tsd_service_pids service;
@@ -103,6 +103,7 @@ static unsigned d2_cw_per_ecm=2;
 static uint8_t d2_ecm_frames[64][4096];
 static uint32_t d2_ecm_frame_sequence[64],d2_ecm_issued,d2_ecm_last_crc;
 static int d2_ecm_have_last;
+static int d2_soft_ok;
 static void d2_on_ecm(void *unused,const uint8_t *section,size_t length) {
  (void)unused;if(length<12 || length>4096 || section[0]!=0x82)return;
  uint32_t crc=(uint32_t)section[length-4]<<24|(uint32_t)section[length-3]<<16|(uint32_t)section[length-2]<<8|section[length-1];
@@ -151,29 +152,31 @@ static int d2_record_init(void){
  done:pthread_mutex_unlock(&d2_init_lock);return r;
 }
 static int d2_dual_capture(void) {
- uint32_t cfg[]={1,4,d2_dual_state.frequency,2,0,0,0},tsio=0,record=0,source=0xae100001,saved[2]={0};
+ // Satellite tuning mode is 8 (verified on device 2026-11-04); mux DB stores sat_id at +24.
+ uint32_t cfg[7],tsio=0,record=0,source=0xae100001,saved[2]={0};
+ tsd_tuning_config(cfg,1,d2_dual_state.frequency,d2_dual_state.satellite_id);
  int tuned=0,connected=0,allocated=0,mapped=0,cas=0,result=0;uint8_t mode=0,all=1;
  struct d2_allocation memory={0};strcpy(memory.tag,"tsr_down");memory.size=0x200000;memory.mode=1;
  uint8_t data[48128],last_cc[8192];memset(last_cc,255,sizeof last_cc);
- result=d2_record_init();if(result)goto done;
- result=DO("fpi_demod_start_connect",cfg,0,0);if(result)goto done;tuned=1;
- uint64_t deadline=d2_now_ms()+10000,last_data=d2_now_ms();uint8_t locked=0;
+ result=d2_record_init();if(result){DIAG("D2 stage=record_init result=%d",result);goto done;}
+ result=DO("fpi_demod_start_connect",cfg,0,0);if(result){DIAG("D2 stage=demod_start tuner=1 system=%u frequency=%u satellite=%u result=%d",cfg[1],cfg[2],cfg[4],result);goto done;}tuned=1;
+ uint64_t deadline=d2_now_ms()+(d2_dual_state.satellite_id?5000:10000),last_data=d2_now_ms();uint8_t locked=0;
  do {if(d2_dual_stopping())goto done;DO("fpi_demod_get_lock_status",1,&locked,0);if(locked)break;usleep(50000);}while(d2_now_ms()<deadline);
- if(!locked){result=20;goto done;}
+ if(!locked){result=20;DIAG("D2 stage=demod_lock tuner=1 system=%u frequency=%u satellite=%u result=%d",cfg[1],cfg[2],cfg[4],result);goto done;}
  struct {const char *name;uint32_t path;} input={"TCL_BONDRIVER_TUNER1",0};
- result=DO("MI_TSIO_Open",&input,&tsio,0);if(result)goto done;
- result=DO("MI_TSIO_ConnectInput",tsio,source,&mode);if(result)goto done;connected=1;
- result=DO("MI_OS_AllocateIommuMemory",&memory,0,0);if(result)goto done;allocated=1;
+ result=DO("MI_TSIO_Open",&input,&tsio,0);if(result){DIAG("D2 stage=tsio_open result=%d",result);goto done;}
+ result=DO("MI_TSIO_ConnectInput",tsio,source,&mode);if(result){DIAG("D2 stage=tsio_connect result=%d",result);goto done;}connected=1;
+ result=DO("MI_OS_AllocateIommuMemory",&memory,0,0);if(result){DIAG("D2 stage=iommu_alloc result=%d",result);goto done;}allocated=1;
  struct d2_recorder params={0};params.name="TCL_BONDRIVER_TUNER1";params.tsio=tsio;params.physical=memory.physical;params.size=memory.size;params.packet=188;
- result=DO("mi_tsr_Open",&params,&record,0);if(result)goto done;
- result=DO("MI_TSR_AddPid",record,0,0);if(result)goto done;
- result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
- if(d2_cw_observe_start()){result=40;goto done;}
+ result=DO("mi_tsr_Open",&params,&record,0);if(result){DIAG("D2 stage=tsr_open result=%d",result);goto done;}
+ result=DO("MI_TSR_AddPid",record,0,0);if(result){DIAG("D2 stage=tsr_addpid result=%d",result);goto done;}
+ result=DO("MI_TSR_Start",record,&all,0);if(result){DIAG("D2 stage=tsr_start result=%d",result);goto done;}
+ if(d2_cw_observe_start()){result=40;DIAG("D2 stage=cw_observe result=%d",result);goto done;}
  __atomic_store_n(&d2_cw_active,1,__ATOMIC_SEQ_CST);
- DO("mif_demux_get_path_params",1,saved,0);result=DO("mif_demux_set_path_params",1,tsio,source);if(result)goto done;mapped=1;
- result=DO("fpi_dtv_demux_change_source_by_tspath_and_stream_port",1,1,2);if(result)goto done;
+ DO("mif_demux_get_path_params",1,saved,0);result=DO("mif_demux_set_path_params",1,tsio,source);if(result){DIAG("D2 stage=demux_set_path result=%d",result);goto done;}mapped=1;
+ result=DO("fpi_dtv_demux_change_source_by_tspath_and_stream_port",1,1,2);if(result){DIAG("D2 stage=change_source result=%d",result);goto done;}
  d2_dual_state.phase=1;d2_dual_state.parsed=0;d2_dual_state.pmt=0;d2_ecm_have_last=0;
- tsd_mux_reset(&d2_mux,d2_dual_state.tsid);tsd_psi_reset(&d2_dual_state.pat_parser,0);deadline=d2_now_ms()+10000;
+ tsd_mux_reset(&d2_mux,d2_dual_state.tsid);tsd_psi_reset(&d2_dual_state.pat_parser,0);deadline=d2_now_ms()+(d2_dual_state.satellite_id?4000:10000);
  pthread_mutex_lock(&d2_dual_lock);d2_dual_state.running=1;d2_dual_state.error=0;d2_dual_state.video_clear=d2_dual_state.audio_clear=0;pthread_mutex_unlock(&d2_dual_lock);
  struct {void *data;uint32_t capacity;} buffer={data,sizeof data};
  while(!d2_dual_stopping()) {
@@ -198,7 +201,7 @@ static int d2_dual_capture(void) {
   }
   if(d2_dual_state.phase==1 && d2_dual_state.parsed) {
    DO("MI_TSR_Stop",record,0,0);result=DO("MI_TSR_AddPid",record,d2_dual_state.pmt,0);if(!result)result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
-   d2_dual_state.phase=2;d2_dual_state.parsed=0;tsd_psi_reset(&d2_dual_state.pmt_parser,d2_dual_state.pmt);memset(last_cc,255,sizeof last_cc);deadline=d2_now_ms()+10000;
+   d2_dual_state.phase=2;d2_dual_state.parsed=0;tsd_psi_reset(&d2_dual_state.pmt_parser,d2_dual_state.pmt);memset(last_cc,255,sizeof last_cc);deadline=d2_now_ms()+(d2_dual_state.satellite_id?4000:10000);
   } else if(d2_dual_state.phase==2 && d2_dual_state.parsed && tsd_mux_ready(&d2_mux)) {
    DO("MI_TSR_Stop",record,0,0);
    struct tsd_service_pids mux_pids;if(tsd_mux_union(&d2_mux,&mux_pids)){result=41;goto done;}
@@ -220,15 +223,16 @@ static int d2_dual_capture(void) {
     tsd_psi_reset(&d2_dual_state.ecm_parser,d2_dual_state.service.ecm);
    }
    d2_dual_state.video_clear=d2_dual_state.service.video==0xffff;d2_dual_state.audio_clear=d2_dual_state.service.audio==0xffff;
-   d2_dual_state.phase=3;d2_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d2_now_ms()+10000;
+   d2_dual_state.phase=3;d2_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d2_now_ms()+(d2_dual_state.satellite_id?4000:10000);
   }
   if(d2_dual_state.phase==3)d2_dual_stream_send(data,size);
   pthread_mutex_lock(&d2_dual_lock);d2_dual_state.bytes+=size;d2_dual_state.sent=d2_dual_sent;d2_dual_state.sync_errors+=sync;d2_dual_state.cc_errors+=cc_errors;d2_dual_state.tei+=tei;
   int newly_ready=!d2_dual_state.ready && d2_dual_state.video_clear && d2_dual_state.audio_clear;
   if(newly_ready){d2_dual_state.ready=1;pthread_cond_broadcast(&d2_dual_cond);}int ready=d2_dual_state.ready;pthread_mutex_unlock(&d2_dual_lock);
-  if(newly_ready)d2_dual_save();if(!ready && d2_now_ms()>deadline){result=22;goto done;}
+  if(newly_ready)d2_dual_save();if(!ready && d2_now_ms()>deadline){if(d2_dual_state.phase==3&&d2_dual_state.satellite_id){pthread_mutex_lock(&d2_dual_lock);d2_dual_state.ready=1;d2_soft_ok=1;pthread_cond_broadcast(&d2_dual_cond);pthread_mutex_unlock(&d2_dual_lock);d2_dual_save();DIAG("D2 stage=softok");}else{result=22;goto done;}}
  }
  done:
+ DIAG("D2 stage=done result=%d",result);
  // Keep immutable queued ECM frames alive across retries and channel changes.
  if(d2_dual_client>=0){close(d2_dual_client);d2_dual_client=-1;epg_viewer(1,0);}
  uint64_t drain_deadline=d2_now_ms()+3000;
@@ -254,14 +258,12 @@ static void d2_dual_stop(void) {
  __atomic_store_n(&d2_dual_stop_flag,1,__ATOMIC_SEQ_CST);if(d2_dual_has_worker){pthread_join(d2_dual_worker,NULL);d2_dual_has_worker=0;}
 }
 static int d2_dual_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear) {
- uint16_t tuple[]={sid,tsid,onid};uint8_t *program=calloc(1,0x10000),mux[104]={0};if(!program)return 3;
- int result=DO("db_dtv_get_prog_info_by_triplet",program,tuple,0);int16_t muxid;memcpy(&muxid,program+0x65d6,2);free(program);if(result!=1)return 9;
- if(DO("db_dtv_get_mux_info_by_muxid",mux,muxid,0)!=1)return 9;uint32_t frequency;memcpy(&frequency,mux+12,4);if(frequency<400000||frequency>800000)return 9;
+ uint32_t frequency=0,satellite=0;int result=tsd_lookup_channel(1,onid,tsid,sid,&frequency,&satellite);if(result)return result;
  if(d2_dual_listener<0)return 41;d2_dual_stop();__atomic_store_n(&epg_scan_channel[1],epg_background(1),__ATOMIC_SEQ_CST);
- pthread_mutex_lock(&d2_dual_lock);memset(&d2_dual_state,0,sizeof d2_dual_state);d2_dual_state.frequency=frequency;d2_dual_state.onid=onid;d2_dual_state.tsid=tsid;d2_dual_state.sid=sid;d2_dual_sent=0;d2_dual_clients=d2_dual_send_errors=0;pthread_mutex_unlock(&d2_dual_lock);
+ pthread_mutex_lock(&d2_dual_lock);memset(&d2_dual_state,0,sizeof d2_dual_state);d2_soft_ok=0;d2_dual_state.frequency=frequency;d2_dual_state.satellite_id=satellite;d2_dual_state.onid=onid;d2_dual_state.tsid=tsid;d2_dual_state.sid=sid;d2_dual_sent=0;d2_dual_clients=d2_dual_send_errors=0;pthread_mutex_unlock(&d2_dual_lock);
  __atomic_store_n(&d2_dual_stop_flag,0,__ATOMIC_SEQ_CST);if(pthread_create(&d2_dual_worker,NULL,d2_dual_main,NULL))return 3;d2_dual_has_worker=1;
  struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=35;
  pthread_mutex_lock(&d2_dual_lock);int wait=0;while(!d2_dual_state.ready&&!d2_dual_state.error&&!wait&&!epg_cancelled(1))wait=pthread_cond_timedwait(&d2_dual_cond,&d2_dual_lock,&deadline);
- *clear=d2_dual_state.ready;result=epg_cancelled(1)?24:(*clear?0:(d2_dual_state.error?d2_dual_state.error:23));pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
+ int is_ready=d2_dual_state.ready;*clear=is_ready&&!d2_soft_ok;result=epg_cancelled(1)?24:(is_ready?0:(d2_dual_state.error?d2_dual_state.error:23));pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
 }
 #undef DO

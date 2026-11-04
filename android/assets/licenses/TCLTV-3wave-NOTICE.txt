@@ -1,0 +1,4 @@
+BS/110-degree CS tuning adapted from 2m3k/TCLTV-Bondriver-3wave, commit 2c7bb42 (MIT).
+https://github.com/2m3k/TCLTV-Bondriver-3wave
+Original TCLTV-Bondriver: Copyright (c) 2026 Long0823-1.
+All precompiled tuner components are rebuilt from source.

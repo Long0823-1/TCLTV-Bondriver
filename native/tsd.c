@@ -112,7 +112,12 @@ static uintptr_t parse_arg(const char *t) {
   return (uintptr_t)strtoul(t, NULL, 0);
 }
 
+// BS/CS routing parameters adapted from 2m3k/TCLTV-Bondriver-3wave, 2c7bb42 (MIT).
+#define DIAG(...) LOG(__VA_ARGS__)
+static pthread_mutex_t route_switch_lock=PTHREAD_MUTEX_INITIALIZER;
 #include "tsd_epg.inc"
+#include "tsd_tuning.h"
+#include "tsd_tuning.inc"
 #include "tsd_dual.inc"
 
 #include "tsd_signal.inc"
@@ -121,7 +126,8 @@ static uintptr_t parse_arg(const char *t) {
 static void handle(int fd, char *line) {
   char *tok[16];
   int n = 0;
-  for (char *p = strtok(line, " \r\n"); p && n < 16; p = strtok(NULL, " \r\n")) tok[n++] = p;
+  char *save=NULL;
+  for (char *p = strtok_r(line, " \r\n", &save); p && n < 16; p = strtok_r(NULL, " \r\n", &save)) tok[n++] = p;
   if (!n) return;
   if (!strcmp(tok[0], "call") && n >= 2) {
     void *f = resolve(tok[1]);
