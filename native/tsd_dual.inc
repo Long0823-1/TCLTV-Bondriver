@@ -257,13 +257,16 @@ static void *d2_dual_main(void *unused) {
 static void d2_dual_stop(void) {
  __atomic_store_n(&d2_dual_stop_flag,1,__ATOMIC_SEQ_CST);if(d2_dual_has_worker){pthread_join(d2_dual_worker,NULL);d2_dual_has_worker=0;}
 }
+// A newer TUNE request for the same tuner bumps this counter and cancels the tune in progress.
+static volatile uint32_t g_tune_gen[2];
 static int d2_dual_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear) {
+ uint32_t gen=__atomic_load_n(&g_tune_gen[1],__ATOMIC_SEQ_CST);
  uint32_t frequency=0,satellite=0;struct tsd_catv_channel catv;int result=tsd_lookup_channel(1,onid,tsid,sid,&frequency,&satellite,&catv);if(result)return result;
  if(d2_dual_listener<0)return 41;d2_dual_stop();__atomic_store_n(&epg_scan_channel[1],epg_background(1),__ATOMIC_SEQ_CST);
  pthread_mutex_lock(&d2_dual_lock);memset(&d2_dual_state,0,sizeof d2_dual_state);d2_soft_ok=0;d2_dual_state.frequency=frequency;d2_dual_state.satellite_id=satellite;d2_dual_state.catv=catv;d2_dual_state.onid=onid;d2_dual_state.tsid=tsid;d2_dual_state.sid=sid;d2_dual_sent=0;d2_dual_clients=d2_dual_send_errors=0;pthread_mutex_unlock(&d2_dual_lock);
  __atomic_store_n(&d2_dual_stop_flag,0,__ATOMIC_SEQ_CST);if(pthread_create(&d2_dual_worker,NULL,d2_dual_main,NULL))return 3;d2_dual_has_worker=1;
  struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=35;
- pthread_mutex_lock(&d2_dual_lock);int wait=0;while(!d2_dual_state.ready&&!d2_dual_state.error&&!wait&&!epg_cancelled(1))wait=pthread_cond_timedwait(&d2_dual_cond,&d2_dual_lock,&deadline);
- int is_ready=d2_dual_state.ready;*clear=is_ready&&!d2_soft_ok;result=epg_cancelled(1)?24:(is_ready?0:(d2_dual_state.error?d2_dual_state.error:23));pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
+ pthread_mutex_lock(&d2_dual_lock);int wait=0;while(!d2_dual_state.ready&&!d2_dual_state.error&&!wait&&!epg_cancelled(1)&&gen==__atomic_load_n(&g_tune_gen[1],__ATOMIC_SEQ_CST))wait=pthread_cond_timedwait(&d2_dual_cond,&d2_dual_lock,&deadline);
+ int is_ready=d2_dual_state.ready;*clear=is_ready&&!d2_soft_ok;result=(epg_cancelled(1)||gen!=__atomic_load_n(&g_tune_gen[1],__ATOMIC_SEQ_CST))?24:(is_ready?0:(d2_dual_state.error?d2_dual_state.error:23));pthread_mutex_unlock(&d2_dual_lock);if(result)d2_dual_stop();return result;
 }
 #undef DO

@@ -188,12 +188,13 @@ static void d0_dual_stop(void) {
  __atomic_store_n(&d0_dual_stop_flag,1,__ATOMIC_SEQ_CST);if(d0_dual_has_worker){pthread_join(d0_dual_worker,NULL);d0_dual_has_worker=0;}
 }
 static int d0_dual_tune(uint16_t onid,uint16_t tsid,uint16_t sid,int *clear) {
+ uint32_t gen=__atomic_load_n(&g_tune_gen[0],__ATOMIC_SEQ_CST);
  uint32_t frequency=0,satellite=0;struct tsd_catv_channel catv;int result=tsd_lookup_channel(0,onid,tsid,sid,&frequency,&satellite,&catv);if(result)return result;
  if(d0_dual_listener<0)return 41;d0_dual_stop();__atomic_store_n(&epg_scan_channel[0],epg_background(0),__ATOMIC_SEQ_CST);
  pthread_mutex_lock(&d0_dual_lock);memset(&d0_dual_state,0,sizeof d0_dual_state);d0_soft_ok=0;d0_dual_state.frequency=frequency;d0_dual_state.satellite_id=satellite;d0_dual_state.catv=catv;d0_dual_state.onid=onid;d0_dual_state.tsid=tsid;d0_dual_state.sid=sid;d0_dual_sent=0;d0_dual_clients=d0_dual_send_errors=0;pthread_mutex_unlock(&d0_dual_lock);
  __atomic_store_n(&d0_dual_stop_flag,0,__ATOMIC_SEQ_CST);if(pthread_create(&d0_dual_worker,NULL,d0_dual_main,NULL))return 3;d0_dual_has_worker=1;
  struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=35;
- pthread_mutex_lock(&d0_dual_lock);int wait=0;while(!d0_dual_state.ready&&!d0_dual_state.error&&!wait&&!epg_cancelled(0))wait=pthread_cond_timedwait(&d0_dual_cond,&d0_dual_lock,&deadline);
- int is_ready=d0_dual_state.ready;*clear=is_ready&&!d0_soft_ok;result=epg_cancelled(0)?24:(is_ready?0:(d0_dual_state.error?d0_dual_state.error:23));pthread_mutex_unlock(&d0_dual_lock);if(result)d0_dual_stop();return result;
+ pthread_mutex_lock(&d0_dual_lock);int wait=0;while(!d0_dual_state.ready&&!d0_dual_state.error&&!wait&&!epg_cancelled(0)&&gen==__atomic_load_n(&g_tune_gen[0],__ATOMIC_SEQ_CST))wait=pthread_cond_timedwait(&d0_dual_cond,&d0_dual_lock,&deadline);
+ int is_ready=d0_dual_state.ready;*clear=is_ready&&!d0_soft_ok;result=(epg_cancelled(0)||gen!=__atomic_load_n(&g_tune_gen[0],__ATOMIC_SEQ_CST))?24:(is_ready?0:(d0_dual_state.error?d0_dual_state.error:23));pthread_mutex_unlock(&d0_dual_lock);if(result)d0_dual_stop();return result;
 }
 #undef DO

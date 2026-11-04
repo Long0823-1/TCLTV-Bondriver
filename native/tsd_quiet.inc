@@ -16,13 +16,19 @@ static volatile int quiet_log_budget=200;
 static volatile unsigned quiet_hidden_total;
 
 static int quiet_background_active(void){return d0_dual_state.running||d2_dual_state.running;}
+// The vendor ECM thread keeps reporting for a while after a receiver stops (channel changes, Mirakurun scans),
+// so keep hiding for QUIET_HOLD_MS after the last time one of our receivers was running.
+#define QUIET_HOLD_MS 90000u
+static volatile uint64_t quiet_last_active_ms;
+static void *quiet_watch(void *arg){(void)arg;for(;;){if(quiet_background_active())quiet_last_active_ms=d2_now_ms();usleep(200000);}return NULL;}
+static int quiet_hold(void){uint64_t last=quiet_last_active_ms;return quiet_background_active()||(last&&d2_now_ms()-last<QUIET_HOLD_MS);}
 static int quiet_disabled(void){struct stat st;return !stat(QUIET_OFF_PATH,&st);}
 
 static uint32_t (*quiet_real_get_ecm)(void);
 static uint32_t quiet_get_ecm(void){
  uint32_t value=quiet_real_get_ecm?quiet_real_get_ecm():0;
  if(value){
-  int active=quiet_background_active(),off=quiet_disabled();
+  int active=quiet_hold(),off=quiet_disabled();
   if(quiet_log_budget>0){quiet_log_budget--;quiet_log("ecm_retcode=0x%x active=%d off=%d",value,active,off);}
   if(active&&!off){quiet_hidden_total++;return 0;}
  }
@@ -34,10 +40,22 @@ static uintptr_t quiet_tvhdtv_notify(uintptr_t a,uintptr_t b,uintptr_t c,uintptr
  return quiet_real_tvhdtv_notify?quiet_real_tvhdtv_notify(a,b,c,d):0;
 }
 
+// app_notify_event(event, a1, a2): a1/a2 carry the B-CAS error code (0xA1xx, e.g. A103) that the UI shows.
+static int (*quiet_real_notify)(uint32_t,uint32_t,uint32_t);
+static int quiet_notify(uint32_t event,uint32_t a1,uint32_t a2){
+ int hit=((a1>>8)==0xA1)||((a2>>8)==0xA1);
+ if(hit){
+  int hold=quiet_hold(),off=quiet_disabled();
+  if(quiet_log_budget>0){quiet_log_budget--;quiet_log("notify_event event=%u a1=0x%x a2=0x%x hold=%d off=%d",event,a1,a2,hold,off);}
+  if(hold&&!off){quiet_hidden_total++;if((a1>>8)==0xA1)a1=0;if((a2>>8)==0xA1)a2=0;}
+ }
+ return quiet_real_notify?quiet_real_notify(event,a1,a2):0;
+}
 struct quiet_target {const char *name;void *wrapper;void **real;};
 static struct quiet_target quiet_targets[]={
  {"tvhdtv_bcas_get_ecm_retcode",(void *)quiet_get_ecm,(void **)&quiet_real_get_ecm},
  {"tvhdtv_notify_event",(void *)quiet_tvhdtv_notify,(void **)&quiet_real_tvhdtv_notify},
+ {"app_notify_event",(void *)quiet_notify,(void **)&quiet_real_notify},
 };
 struct quiet_scan {int patched;};
 static int quiet_patch_lib(struct dl_phdr_info *info,size_t size,void *data){
@@ -76,6 +94,7 @@ static int quiet_patch_lib(struct dl_phdr_info *info,size_t size,void *data){
 }
 // Called once from the service thread, after libisdb.so is loaded.
 static void quiet_install(void){
+ pthread_t watcher;if(!pthread_create(&watcher,NULL,quiet_watch,NULL))pthread_detach(watcher);
  struct quiet_scan scan={0};dl_iterate_phdr(quiet_patch_lib,&scan);
  LOG("quiet: patched %d import(s)",scan.patched);quiet_log("patched total=%d",scan.patched);
 }

@@ -104,7 +104,13 @@ static void *control_client(void *arg) {
   if(control_number(words[4],&onid) || control_number(words[5],&tsid) || control_number(words[6],&sid)) { out(fd,"ERR parameters\n");goto done; }
   int tuner=words[3][0]-'0';epg_external(tuner);
   pthread_mutex_t *tune_lock=!strcmp(words[3],"1")?&g_tune1_serial:&g_tune_serial;
-  int locked=pthread_mutex_trylock(tune_lock);for(int retry=0;locked&&retry<60;retry++){usleep(50000);locked=pthread_mutex_trylock(tune_lock);}if(locked){out(fd,"ERR busy\n");goto done;}
+  // A new request supersedes a tune that is still in progress (fast channel changes in TVTest scans).
+  uint32_t my_gen=__atomic_add_fetch(&g_tune_gen[tuner],1,__ATOMIC_SEQ_CST);
+  if(tuner)pthread_cond_broadcast(&d2_dual_cond);else pthread_cond_broadcast(&d0_dual_cond);
+  int locked=pthread_mutex_trylock(tune_lock);
+  for(int retry=0;locked&&retry<400;retry++){usleep(50000);if(__atomic_load_n(&g_tune_gen[tuner],__ATOMIC_SEQ_CST)!=my_gen){out(fd,"ERR superseded\n");goto done;}locked=pthread_mutex_trylock(tune_lock);}
+  if(locked){out(fd,"ERR busy\n");goto done;}
+  if(__atomic_load_n(&g_tune_gen[tuner],__ATOMIC_SEQ_CST)!=my_gen){pthread_mutex_unlock(tune_lock);out(fd,"ERR superseded\n");goto done;}
   pthread_mutex_lock(&g_pvr_lock); int running=g_pvrstream_started; pthread_mutex_unlock(&g_pvr_lock);
   int clear=0,result=running ? (!strcmp(words[3],"1")?d2_dual_tune(onid,tsid,sid,&clear):control_tune(onid,tsid,sid,&clear)) : 4;
   if(result) out(fd,"ERR tune=%d\n",result);
