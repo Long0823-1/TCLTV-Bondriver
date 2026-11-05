@@ -139,7 +139,7 @@ static int d0_dual_capture(void) {
   if(d0_dual_state.phase==1 && d0_dual_state.parsed) {
    DO("MI_TSR_Stop",record,0,0);result=DO("MI_TSR_AddPid",record,d0_dual_state.pmt,0);if(!result)result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
    d0_dual_state.phase=2;d0_dual_state.parsed=0;tsd_psi_reset(&d0_dual_state.pmt_parser,d0_dual_state.pmt);memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:10000);
-  } else if(d0_dual_state.phase==2 && d0_dual_state.parsed && (tsd_mux_ready(&d0_mux)||(d0_dual_state.catv.enabled&&d0_mux.pat&&d0_mux.count&&!d0_mux.error&&d0_now_ms()+7000>deadline))) {
+  } else if(d0_dual_state.phase==2 && d0_dual_state.parsed && (tsd_mux_ready(&d0_mux)||(d0_dual_state.catv.enabled&&d0_mux.pat&&d0_mux.count&&!d0_mux.error&&d0_now_ms()+8800>deadline))) {
    DO("MI_TSR_Stop",record,0,0);
    struct tsd_service_pids mux_pids;if(tsd_mux_union(&d0_mux,&mux_pids)){result=41;goto done;}
    for(unsigned i=0;i<mux_pids.count;i++){if(mux_pids.pids[i]==0||mux_pids.pids[i]==d0_dual_state.pmt)continue;result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
@@ -153,7 +153,7 @@ static int d0_dual_capture(void) {
     tsd_psi_reset(&d0_dual_state.ecm_parser,d0_dual_state.service.ecm);
    }
    d0_dual_state.video_clear=d0_dual_state.service.video==0xffff;d0_dual_state.audio_clear=d0_dual_state.service.audio==0xffff;
-   d0_dual_state.phase=3;d0_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:(d0_dual_state.catv.enabled?3000:10000));
+   d0_dual_state.phase=3;d0_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:(d0_dual_state.catv.enabled?1500:10000));
   }
   if(d0_dual_state.phase==3)d0_dual_stream_send(data,size);
   pthread_mutex_lock(&d0_dual_lock);d0_dual_state.bytes+=size;d0_dual_state.sent=d0_dual_sent;d0_dual_state.sync_errors+=sync;d0_dual_state.cc_errors+=cc_errors;d0_dual_state.tei+=tei;
@@ -165,8 +165,9 @@ static int d0_dual_capture(void) {
  DIAG("D0 stage=done result=%d",result);
  // Keep immutable queued ECM frames alive across retries and channel changes.
  if(d0_dual_stopping()&&d0_dual_client>=0){close(d0_dual_client);d0_dual_client=-1;epg_viewer(0,0);}
- uint64_t drain_deadline=d0_now_ms()+3000;
- while(__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST)<d0_ecm_issued && d0_now_ms()<drain_deadline){d0_dual_keepalive();usleep(10000);}
+ uint64_t drain_deadline=d0_now_ms()+((d0_dual_state.catv.enabled&&!(d0_dual_state.video_clear&&d0_dual_state.audio_clear))?200:3000); /* nothing to wait for when the channel never descrambled (no contract) */
+ {__typeof__(d2_cw_counts[0]) seen=__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST);uint64_t changed=d0_now_ms();
+  while(seen<d0_ecm_issued && d0_now_ms()<drain_deadline){d0_dual_keepalive();usleep(10000);__typeof__(seen) now=__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST);if(now!=seen){seen=now;changed=d0_now_ms();}else if(d0_now_ms()-changed>500)break;}}
  if(cas)primary_other_close();
 
  if(mapped)DO("mif_demux_set_path_params",0,saved[0],saved[1]);

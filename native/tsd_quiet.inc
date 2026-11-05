@@ -12,7 +12,7 @@
 #define QUIET_OFF_PATH "/data/local/tmp/tsd_quiet_off"
 #define QUIET_LOG_PATH "/data/local/tmp/tsd_quiet.log"
 static void quiet_log(const char *format,...){FILE *f=fopen(QUIET_LOG_PATH,"a");if(!f)return;va_list args;va_start(args,format);vfprintf(f,format,args);va_end(args);fputc(10,f);fclose(f);}
-static volatile int quiet_log_budget=200;
+static volatile int quiet_log_budget=500;
 static volatile unsigned quiet_hidden_total;
 
 static int quiet_background_active(void){return d0_dual_state.running||d2_dual_state.running;}
@@ -40,22 +40,50 @@ static uintptr_t quiet_tvhdtv_notify(uintptr_t a,uintptr_t b,uintptr_t c,uintptr
  return quiet_real_tvhdtv_notify?quiet_real_tvhdtv_notify(a,b,c,d):0;
 }
 
-// app_notify_event(event, a1, a2): a1/a2 carry the B-CAS error code (0xA1xx, e.g. A103) that the UI shows.
+// app_notify_event(event, a1, a2): a1/a2 carry either the value or a pointer to it. Inspect both without risking a
+// fault: probe pointers with write() to a pipe (EFAULT for an unmapped address).
+static int quiet_probe_pipe[2]={-1,-1};
+static int quiet_peek32(uint32_t pointer,uint32_t *value){
+ if(pointer<0x10000||quiet_probe_pipe[1]<0)return 0;
+ char scratch[8];ssize_t n;
+ n=write(quiet_probe_pipe[1],(const void *)(uintptr_t)pointer,4);
+ if(n!=4)return 0;
+ if(read(quiet_probe_pipe[0],scratch,4)!=4)return 0;
+ memcpy(value,scratch,4);return 1;
+}
+static uint32_t quiet_zero_value;
 static int (*quiet_real_notify)(uint32_t,uint32_t,uint32_t);
 static int quiet_notify(uint32_t event,uint32_t a1,uint32_t a2){
+ int is_a1=((a1>>8)==0xA1)||((a2>>8)==0xA1),ptr_a1=0,ptr_a2=0;uint32_t v1=0,v2=0;
+ if(quiet_hold()){
+  if(quiet_peek32(a1,&v1)&&((v1&0xffff)>>8)==0xA1)ptr_a1=1;
+  if(quiet_peek32(a2,&v2)&&((v2&0xffff)>>8)==0xA1)ptr_a2=1;
+  if(quiet_log_budget>0&&(is_a1||ptr_a1||ptr_a2||event>0)){quiet_log_budget--;quiet_log("notify_event event=%u a1=0x%x a2=0x%x v1=0x%x v2=0x%x hit=%d%d%d",event,a1,a2,v1,v2,is_a1,ptr_a1,ptr_a2);}
+  if(!quiet_disabled()){
+   if(is_a1){quiet_hidden_total++;if((a1>>8)==0xA1)a1=0;if((a2>>8)==0xA1)a2=0;}
+   if(ptr_a1){quiet_hidden_total++;a1=(uint32_t)(uintptr_t)&quiet_zero_value;}
+   if(ptr_a2){quiet_hidden_total++;a2=(uint32_t)(uintptr_t)&quiet_zero_value;}
+  }
+ }
+ return quiet_real_notify?quiet_real_notify(event,a1,a2):0;
+}
+// tvh_nortify_event(event, data1, data2) is what tvhdtv_bcas_main_proc really uses to tell the UI about ECM errors.
+static int (*quiet_real_tvh)(uint32_t,uint32_t,uint32_t);
+static int quiet_tvh(uint32_t event,uint32_t a1,uint32_t a2){
  int hit=((a1>>8)==0xA1)||((a2>>8)==0xA1);
  if(hit){
   int hold=quiet_hold(),off=quiet_disabled();
-  if(quiet_log_budget>0){quiet_log_budget--;quiet_log("notify_event event=%u a1=0x%x a2=0x%x hold=%d off=%d",event,a1,a2,hold,off);}
+  if(quiet_log_budget>0){quiet_log_budget--;quiet_log("tvh_nortify_event event=0x%x a1=0x%x a2=0x%x hold=%d off=%d",event,a1,a2,hold,off);}
   if(hold&&!off){quiet_hidden_total++;if((a1>>8)==0xA1)a1=0;if((a2>>8)==0xA1)a2=0;}
  }
- return quiet_real_notify?quiet_real_notify(event,a1,a2):0;
+ return quiet_real_tvh?quiet_real_tvh(event,a1,a2):1;
 }
 struct quiet_target {const char *name;void *wrapper;void **real;};
 static struct quiet_target quiet_targets[]={
  {"tvhdtv_bcas_get_ecm_retcode",(void *)quiet_get_ecm,(void **)&quiet_real_get_ecm},
  {"tvhdtv_notify_event",(void *)quiet_tvhdtv_notify,(void **)&quiet_real_tvhdtv_notify},
  {"app_notify_event",(void *)quiet_notify,(void **)&quiet_real_notify},
+ {"tvh_nortify_event",(void *)quiet_tvh,(void **)&quiet_real_tvh},
 };
 struct quiet_scan {int patched;};
 static int quiet_patch_lib(struct dl_phdr_info *info,size_t size,void *data){
@@ -94,6 +122,7 @@ static int quiet_patch_lib(struct dl_phdr_info *info,size_t size,void *data){
 }
 // Called once from the service thread, after libisdb.so is loaded.
 static void quiet_install(void){
+ if(pipe(quiet_probe_pipe))quiet_probe_pipe[0]=quiet_probe_pipe[1]=-1;
  pthread_t watcher;if(!pthread_create(&watcher,NULL,quiet_watch,NULL))pthread_detach(watcher);
  struct quiet_scan scan={0};dl_iterate_phdr(quiet_patch_lib,&scan);
  LOG("quiet: patched %d import(s)",scan.patched);quiet_log("patched total=%d",scan.patched);
