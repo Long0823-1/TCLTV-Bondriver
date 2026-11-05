@@ -102,14 +102,17 @@ static struct {
 static unsigned d2_cw_per_ecm=2;
 static uint8_t d2_ecm_frames[64][4096];
 static uint32_t d2_ecm_frame_sequence[64],d2_ecm_issued,d2_ecm_last_crc;
-static int d2_ecm_have_last;
+static int d2_ecm_have_last;static uint64_t d2_ecm_progress_ms;static unsigned d2_ecm_progress_seen;
 static int d2_soft_ok;
 static void d2_on_ecm(void *unused,const uint8_t *section,size_t length) {
  (void)unused;if(length<12 || length>4096 || section[0]!=0x82)return;
  uint32_t crc=(uint32_t)section[length-4]<<24|(uint32_t)section[length-3]<<16|(uint32_t)section[length-2]<<8|section[length-1];
  if(d2_ecm_have_last && crc==d2_ecm_last_crc)return;
  unsigned completed=__atomic_load_n(&d2_cw_counts[1],__ATOMIC_SEQ_CST),slot=64;
+ {uint64_t now_ms=d2_now_ms();if(!d2_ecm_progress_ms||completed!=d2_ecm_progress_seen){d2_ecm_progress_seen=completed;d2_ecm_progress_ms=now_ms;}}
  for(unsigned i=0;i<64;i++)if(!d2_ecm_frame_sequence[i]||d2_ecm_frame_sequence[i]<completed){slot=i;break;}
+ /* the vendor key worker stopped consuming frames (e.g. ECM errors): free the pool instead of rejecting every later ECM forever */
+ if(slot==64&&d2_now_ms()-d2_ecm_progress_ms>2000){memset(d2_ecm_frame_sequence,0,sizeof d2_ecm_frame_sequence);d2_ecm_issued=completed;slot=0;d2_ecm_progress_ms=d2_now_ms();}
  if(slot==64){pthread_mutex_lock(&d2_dual_lock);d2_dual_state.ecm_errors++;pthread_mutex_unlock(&d2_dual_lock);return;}
  uint8_t *parsed=d2_ecm_frames[slot];memset(parsed,0,4096);
  if(DO("tvhsipsi_parse_ecm",parsed,section,0) || DO("bcas_task_sendmsg_ex",0xa003,parsed,1)){pthread_mutex_lock(&d2_dual_lock);d2_dual_state.ecm_errors++;pthread_mutex_unlock(&d2_dual_lock);return;}
@@ -171,6 +174,7 @@ static int d2_dual_capture(void) {
  result=DO("mi_tsr_Open",&params,&record,0);if(result){DIAG("D2 stage=tsr_open result=%d",result);goto done;}
  result=DO("MI_TSR_AddPid",record,0,0);if(result){DIAG("D2 stage=tsr_addpid result=%d",result);goto done;}
  result=DO("MI_TSR_Start",record,&all,0);if(result){DIAG("D2 stage=tsr_start result=%d",result);goto done;}
+ memset(d2_ecm_frame_sequence,0,sizeof d2_ecm_frame_sequence);d2_ecm_issued=0;d2_ecm_have_last=0;d2_ecm_progress_ms=0;
  if(d2_cw_observe_start()){result=40;DIAG("D2 stage=cw_observe result=%d",result);goto done;}
  __atomic_store_n(&d2_cw_active,1,__ATOMIC_SEQ_CST);
  DO("mif_demux_get_path_params",1,saved,0);result=DO("mif_demux_set_path_params",1,tsio,source);if(result){DIAG("D2 stage=demux_set_path result=%d",result);goto done;}mapped=1;
