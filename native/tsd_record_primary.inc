@@ -91,6 +91,90 @@ static void d0_dual_save(void) {
  if(!bad){chmod("/data/local/tmp/tsd_last_record_channel_0.new",0600);rename("/data/local/tmp/tsd_last_record_channel_0.new","/data/local/tmp/tsd_last_record_channel_0");}
 }
 static struct tsd_mux d0_mux;
+
+static uint8_t d0_filter_allowed[8192];
+static uint8_t d0_filter_pat[188];
+static uint8_t d0_filter_pat_cc;
+static int d0_filter_active;
+
+static struct tsd_psi d0_sdt_parser;
+static uint8_t d0_filter_sdt_sec[4104];
+static size_t d0_filter_sdt_len;
+static size_t d0_sdt_emit_pos;
+static uint8_t d0_filter_sdt_cc;
+static int d0_filter_sdt_ready;
+static unsigned d0_sdt_sections;
+static void d0_sdt_section(void *unused,const uint8_t *sec,size_t len) {
+ (void)unused;
+ if(d0_filter_sdt_ready||sec[0]!=0x42||len<15||(((unsigned)sec[3]<<8)|sec[4])!=d0_dual_state.tsid)return;
+ d0_sdt_sections++;
+ size_t off=11;
+ while(off+5<=len-4) {
+  unsigned sid=((unsigned)sec[off]<<8)|sec[off+1];
+  unsigned elen=5+((((unsigned)sec[off+3]&15)<<8)|sec[off+4]);
+  if(off+elen>len-4)break;
+  if(sid==d0_dual_state.sid) {
+   if(15+elen>(int)sizeof(d0_filter_sdt_sec)){d0_filter_sdt_ready=2;DIAG("D0 stage=sdtbig sid=%u",sid);return;}
+   uint8_t *o=d0_filter_sdt_sec;
+   o[0]=0x42;o[1]=(uint8_t)(0xB0|((12+elen)>>8));o[2]=(uint8_t)(12+elen);
+   o[3]=sec[3];o[4]=sec[4];o[5]=sec[5];o[6]=0;o[7]=0;o[8]=sec[8];o[9]=sec[9];o[10]=0xFF;
+   memcpy(o+11,sec+off,elen);
+   uint32_t crc=tsd_crc32(o,11+elen);
+   o[11+elen]=(uint8_t)(crc>>24);o[12+elen]=(uint8_t)(crc>>16);o[13+elen]=(uint8_t)(crc>>8);o[14+elen]=(uint8_t)crc;
+   d0_filter_sdt_len=15+elen;d0_sdt_emit_pos=0;
+   d0_filter_sdt_ready=1;
+   DIAG("D0 stage=sdt sid=%u bytes=%u",sid,elen);
+   return;
+  }
+  off+=elen;
+ }
+ if(d0_sdt_sections>=3){d0_filter_sdt_ready=2;DIAG("D0 stage=sdtpass sid=%u",d0_dual_state.sid);}
+}
+static void d0_filter_build(void) {
+ memset(d0_filter_allowed,0,sizeof d0_filter_allowed);
+ for(unsigned i=0;i<d0_dual_state.service.count;i++){uint16_t pid=d0_dual_state.service.pids[i];if(pid<8192)d0_filter_allowed[pid]=1;}
+ if(d0_dual_state.pmt&&d0_dual_state.pmt<8192)d0_filter_allowed[d0_dual_state.pmt]=1;
+ uint8_t *s=d0_filter_pat;
+ s[0]=0x47;s[1]=0x40;s[2]=0;s[3]=0x10;s[4]=0;
+ uint8_t *sec=s+5;
+ sec[0]=0;sec[1]=0xB0;sec[2]=13;
+ sec[3]=(uint8_t)(d0_dual_state.tsid>>8);sec[4]=(uint8_t)d0_dual_state.tsid;
+ sec[5]=0xC1;sec[6]=0;sec[7]=0;
+ sec[8]=(uint8_t)(d0_dual_state.sid>>8);sec[9]=(uint8_t)d0_dual_state.sid;
+ sec[10]=(uint8_t)(0xE0|((d0_dual_state.pmt>>8)&31));sec[11]=(uint8_t)d0_dual_state.pmt;
+ uint32_t crc=tsd_crc32(sec,12);
+ sec[12]=(uint8_t)(crc>>24);sec[13]=(uint8_t)(crc>>16);sec[14]=(uint8_t)(crc>>8);sec[15]=(uint8_t)crc;
+ memset(s+21,0xFF,188-21);
+ d0_filter_pat_cc=0;d0_filter_active=1;
+ tsd_psi_reset(&d0_sdt_parser,0x11);d0_filter_sdt_ready=0;d0_filter_sdt_cc=0;d0_sdt_sections=0;d0_sdt_emit_pos=0;
+ DIAG("D0 stage=filter sid=%u pmt=%u pids=%u",d0_dual_state.sid,d0_dual_state.pmt,d0_dual_state.service.count);
+}
+static uint32_t d0_filter_stream(uint8_t *data,uint32_t size) {
+ uint32_t out=0;
+ for(uint32_t i=0;i+188<=size;i+=188) {
+  uint8_t *p=data+i;unsigned pid=((p[1]&31)<<8)|p[2];
+  if(!pid) {
+   if(!(p[1]&64))continue;
+   memmove(data+out,d0_filter_pat,188);data[out+3]=(uint8_t)(0x10|(d0_filter_pat_cc++&15));out+=188;continue;
+  }
+  if(pid==0x11) {
+   tsd_psi_feed(&d0_sdt_parser,p,d0_sdt_section,NULL);
+   if(d0_filter_sdt_ready==2) {if(out!=i)memmove(data+out,p,188);out+=188;}
+   else if(d0_filter_sdt_ready==1) {
+    size_t pos=d0_sdt_emit_pos,cap=pos?184:183,chunk=d0_filter_sdt_len-pos;if(chunk>cap)chunk=cap;
+    uint8_t *pkt=data+out;
+    pkt[0]=0x47;pkt[1]=pos?0:0x40;pkt[2]=0x11;pkt[3]=(uint8_t)(0x10|(d0_filter_sdt_cc++&15));
+    size_t o=4;if(!pos){pkt[4]=0;o=5;}
+    memcpy(pkt+o,d0_filter_sdt_sec+pos,chunk);memset(pkt+o+chunk,0xFF,188-(o+chunk));
+    d0_sdt_emit_pos=(pos+chunk>=d0_filter_sdt_len)?0:pos+chunk;
+    out+=188;
+   }
+   continue;
+  }
+  if(pid<8192&&d0_filter_allowed[pid]) {if(out!=i)memmove(data+out,p,188);out+=188;}
+ }
+ return out;
+}
 static int d0_dual_capture(void) {
  // G06 satellite tuning mode is 8; its mux DB stores sat_id at +24.
  uint32_t cfg[7],tsio=0,record=0,source=0xae100000,saved[2]={0};
@@ -100,7 +184,7 @@ static int d0_dual_capture(void) {
  uint8_t data[48128],last_cc[8192];memset(last_cc,255,sizeof last_cc);
  result=d2_record_init();if(result){DIAG("D0 stage=record_init result=%d",result);goto done;}
  int catv_locked=0;result=d0_dual_state.catv.enabled?catv_tune_locked(0,&d0_dual_state.catv,1500,6,d0_dual_stopping,d0_dual_keepalive):DO("fpi_demod_start_connect",cfg,0,0);if(d0_dual_state.catv.enabled&&!result)catv_locked=1;if(result==21)goto done;if(result&&!(d0_dual_state.catv.enabled&&result==20)){DIAG("D0 stage=demod_start system=%u frequency=%u satellite=%u result=%d",cfg[1],cfg[2],cfg[4],result);goto done;}tuned=1;
- uint64_t deadline=d0_now_ms()+(d0_dual_state.satellite_id?5000:10000),last_data=d0_now_ms();uint8_t locked=0;
+ uint64_t deadline=d0_now_ms()+(d0_dual_state.catv.enabled?10000:(d0_dual_state.satellite_id?2500:10000)),last_data=d0_now_ms();uint8_t locked=0;
  locked=catv_locked;do {if(locked)break;if(d0_dual_stopping())goto done;if(d0_dual_state.catv.enabled)catv_lock(0,&locked);else DO("fpi_demod_get_lock_status",0,&locked,0);if(locked)break;d0_dual_keepalive();usleep(50000);}while(d0_now_ms()<deadline);
  if(!locked){result=20;DIAG("D0 stage=demod_lock result=%d",result);goto done;}
  result=DO("mif_demux_get_path_params",0,saved,0);if(result){DIAG("D0 stage=demux_get_path result=%d",result);goto done;}
@@ -116,13 +200,13 @@ static int d0_dual_capture(void) {
 
  result=DO("mif_demux_set_path_params",0,tsio,source);if(result){DIAG("D0 stage=demux_set_path result=%d",result);goto done;}mapped=1;
  result=DO("fpi_dtv_demux_change_source_by_tspath_and_stream_port",0,0,2);if(result){DIAG("D0 stage=change_source result=%d",result);goto done;}
- d0_dual_state.phase=1;d0_dual_state.parsed=0;d0_dual_state.pmt=0;d0_ecm_have_last=0;
- tsd_mux_reset(&d0_mux,d0_dual_state.tsid);tsd_psi_reset(&d0_dual_state.pat_parser,0);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:10000);
+ d0_dual_state.phase=1;d0_dual_state.parsed=0;d0_dual_state.pmt=0;d0_filter_active=0;d0_ecm_have_last=0;
+ tsd_mux_reset(&d0_mux,d0_dual_state.tsid);tsd_psi_reset(&d0_dual_state.pat_parser,0);deadline=d0_now_ms()+(d0_dual_state.catv.enabled?10000:(d0_dual_state.satellite_id?2000:10000));
  pthread_mutex_lock(&d0_dual_lock);d0_dual_state.running=1;d0_dual_state.error=0;d0_dual_state.video_clear=d0_dual_state.audio_clear=0;pthread_mutex_unlock(&d0_dual_lock);
  struct {void *data;uint32_t capacity;} buffer={data,sizeof data};
  while(!d0_dual_stopping()) {
   d0_dual_keepalive();uint32_t size=0;result=DO("MI_TSR_Read",record,&buffer,&size);
-  if(result==3 || (!result&&!size)) {if(d0_now_ms()>last_data+(d0_dual_state.ready?1500:10000)){result=21;goto done;}usleep(3000);continue;}
+  if(result==3 || (!result&&!size)) {if(d0_now_ms()>last_data+(d0_dual_state.ready?6000:4000)){result=21;goto done;}usleep(3000);continue;}
   if(result)goto done;if(size>sizeof data || size%188){result=31;goto done;}last_data=d0_now_ms();
   unsigned sync=0,cc_errors=0,tei=0;
   for(uint32_t i=0;i<size;i+=188) {
@@ -142,8 +226,8 @@ static int d0_dual_capture(void) {
   }
   if(d0_dual_state.phase==1 && d0_dual_state.parsed) {
    DO("MI_TSR_Stop",record,0,0);result=DO("MI_TSR_AddPid",record,d0_dual_state.pmt,0);if(!result)result=DO("MI_TSR_Start",record,&all,0);if(result)goto done;
-   d0_dual_state.phase=2;d0_dual_state.parsed=0;tsd_psi_reset(&d0_dual_state.pmt_parser,d0_dual_state.pmt);memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:10000);
-  } else if(d0_dual_state.phase==2 && d0_dual_state.parsed && (tsd_mux_ready(&d0_mux)||(d0_dual_state.catv.enabled&&d0_mux.pat&&d0_mux.count&&!d0_mux.error&&d0_now_ms()+8800>deadline))) {
+   d0_dual_state.phase=2;d0_dual_state.parsed=0;tsd_psi_reset(&d0_dual_state.pmt_parser,d0_dual_state.pmt);memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.catv.enabled?10000:(d0_dual_state.satellite_id?2000:10000));
+  } else if(d0_dual_state.phase==2 && d0_dual_state.parsed && (tsd_mux_ready(&d0_mux)||(d0_dual_state.catv.enabled&&d0_mux.pat&&d0_mux.count&&!d0_mux.error&&d0_now_ms()+8800>deadline)||(tsd_mux_target_ready(&d0_mux,d0_dual_state.sid)&&d0_now_ms()+1000>=deadline))) {
    DO("MI_TSR_Stop",record,0,0);
    struct tsd_service_pids mux_pids;if(tsd_mux_union(&d0_mux,&mux_pids)){result=41;goto done;}
    for(unsigned i=0;i<mux_pids.count;i++){if(mux_pids.pids[i]==0||mux_pids.pids[i]==d0_dual_state.pmt)continue;result=DO("MI_TSR_AddPid",record,mux_pids.pids[i],0);if(result)goto done;}
@@ -156,10 +240,13 @@ static int d0_dual_capture(void) {
     d0_ecm_issued=__atomic_load_n(&d2_cw_counts[0],__ATOMIC_SEQ_CST);
     tsd_psi_reset(&d0_dual_state.ecm_parser,d0_dual_state.service.ecm);
    }
+   if(d0_dual_state.service.video==0xffff && d0_dual_state.service.audio==0xffff){result=22;DIAG("D0 stage=noav sid=%u",d0_dual_state.sid);goto done;}
    d0_dual_state.video_clear=d0_dual_state.service.video==0xffff;d0_dual_state.audio_clear=d0_dual_state.service.audio==0xffff;
-   d0_dual_state.phase=3;d0_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?4000:(d0_dual_state.catv.enabled?1500:10000));
+   d0_dual_state.phase=3;d0_dual_state.parsed=0;memset(last_cc,255,sizeof last_cc);deadline=d0_now_ms()+(d0_dual_state.satellite_id?1500:(d0_dual_state.catv.enabled?1500:10000));
+   d0_filter_build();
   }
-  if(d0_dual_state.phase==3)d0_dual_stream_send(data,size);
+  if(d0_dual_state.phase==1 && d0_mux.pat && !d0_mux.error) {unsigned k=0;for(;k<d0_mux.count;k++)if(d0_mux.programs[k].sid==d0_dual_state.sid)break;if(k==d0_mux.count){result=22;DIAG("D0 stage=absent sid=%u tsid=%u",d0_dual_state.sid,d0_dual_state.tsid);goto done;}}
+  if(d0_dual_state.phase==3){uint32_t out_size=d0_filter_active?d0_filter_stream(data,size):size;if(out_size)d0_dual_stream_send(data,out_size);}
   pthread_mutex_lock(&d0_dual_lock);d0_dual_state.bytes+=size;d0_dual_state.sent=d0_dual_sent;d0_dual_state.sync_errors+=sync;d0_dual_state.cc_errors+=cc_errors;d0_dual_state.tei+=tei;
   int newly_ready=!d0_dual_state.ready && d0_dual_state.video_clear && d0_dual_state.audio_clear;
   if(newly_ready){d0_dual_state.ready=1;pthread_cond_broadcast(&d0_dual_cond);}int ready=d0_dual_state.ready;pthread_mutex_unlock(&d0_dual_lock);

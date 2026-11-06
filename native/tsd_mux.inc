@@ -31,4 +31,5 @@ static void tsd_mux_pat(void *context,const uint8_t *s,size_t n) {
 static void tsd_mux_reset(struct tsd_mux *m,uint16_t tsid){memset(m,0,sizeof(*m));m->tsid=tsid;tsd_psi_reset(&m->parser,0);}
 static void tsd_mux_feed(struct tsd_mux *m,const uint8_t *p){tsd_psi_feed(&m->parser,p,tsd_mux_pat,m);for(unsigned i=0;i<m->count;i++)if(!m->programs[i].ready)tsd_psi_feed(&m->programs[i].parser,p,tsd_mux_pmt,&m->programs[i]);}
 static int tsd_mux_ready(const struct tsd_mux *m){if(!m->pat||!m->count||m->error)return 0;for(unsigned i=0;i<m->count;i++)if(!m->programs[i].ready)return 0;return 1;}
+static int tsd_mux_target_ready(const struct tsd_mux *m,uint16_t sid){if(!m->pat)return 0;for(unsigned i=0;i<m->count;i++)if(m->programs[i].sid==sid)return m->programs[i].ready;return 0;}
 static int tsd_mux_union(const struct tsd_mux *m,struct tsd_service_pids *out){memset(out,0,sizeof(*out));for(unsigned i=0;i<m->count;i++){const struct tsd_mux_program *p=&m->programs[i];if(tsd_pid_add(out,p->pid))return -1;if(p->service.video==0xffff&&p->service.audio==0xffff)continue;for(unsigned j=0;j<p->service.count;j++)if(tsd_pid_add(out,p->service.pids[j]))return -1;}return 0;}
