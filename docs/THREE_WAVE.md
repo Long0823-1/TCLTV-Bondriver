@@ -2,7 +2,7 @@
 
 ## 移植元と設計
 
-移植元: https://github.com/2m3k/TCLTV-Bondriver-3wave （`2c7bb42`、参照HEAD `c5f121e`、MIT）。
+移植元: https://github.com/2m3k/TCLTV-Bondriver-3wave （`7ea6351`「update to 0.1-beta」、MIT）。
 衛星は demod mode=8、LバンドIF周波数(kHz)、帯域欄0、satellite ID=59(BS)/60(CS)を使用します。
 地デジは mode=4、帯域欄2を維持します。周波数・satellite IDはTVのスキャンDBから取得します。
 局のID・周波数を地域固定の表に置き換えません。
