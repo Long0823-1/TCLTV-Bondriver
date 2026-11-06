@@ -37,7 +37,7 @@ namespace TclBonDriverSetup {
     if(number=="NULL")number="";
     if(name.Length==0||name=="NULL")continue;
     if(name.Length>200||number.Length>32||name.IndexOf('\0')>=0||number.IndexOf('\0')>=0)throw new IOException("TVのチャンネル名を確認できません。");
-    string key=system+":"+onid+":"+tsid+":"+sid;if(!seen.Add(key))continue;
+    string key=onid+":"+tsid+":"+sid;if(!seen.Add(key))continue;
     if(channels.Count==Maximum)throw new IOException("地上波とBS/CSの登録数が上限512を超えています。");
     channels.Add(new TvChannel{Number=number,Name=name,System=system=="TYPE_ISDB_C"?"ISDB-C":system=="TYPE_ISDB_S"?"ISDB-S":"ISDB-T",Onid=onid,Tsid=tsid,Sid=sid});
    }
