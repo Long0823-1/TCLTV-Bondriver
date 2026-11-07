@@ -24,8 +24,8 @@ public final class MainActivity extends Activity {
   super.onCreate(saved);
   ScrollView scroll=new ScrollView(this);
   LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(48),dp(28),dp(48),dp(28));root.setBackgroundColor(Color.rgb(15,26,34));scroll.addView(root);setContentView(scroll);
-  TextView title=text("TCL BonDriver 0.7.0-pre.1",28,Color.WHITE);root.addView(title);
-  root.addView(text("テレビで別のアプリを使いながら、PCで地デジ・BS/CS・CATV（J:COMなど）を選局（衛星実受信は未検証）",16,Color.rgb(180,197,208)));
+  TextView title=text("TCL BonDriver 0.7.0-pre.4",30,Color.WHITE);root.addView(title);
+  root.addView(text("テレビで別のアプリを使いながら、PCで地デジ・BS/CS・CATV（J:COMなど）を選局（衛星実受信は未検証）",17,Color.rgb(180,197,208)));
   network=text("有線LAN IP：確認中…",22,Color.rgb(125,218,190));network.setTextIsSelectable(true);network.setPadding(0,dp(16),0,0);root.addView(network);
   status=text("初めて使う場合は「セットアップ」を選んでください。",18,Color.WHITE);status.setPadding(0,dp(24),0,dp(12));root.addView(status);pairingInfo=text("",28,Color.rgb(125,218,190));pairingInfo.setFocusable(true);pairingInfo.setVisibility(View.GONE);root.addView(pairingInfo);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress);
@@ -58,7 +58,7 @@ public final class MainActivity extends Activity {
   button(root,"通信維持を停止する",()->perform("通信維持を停止しています…",()->{NetworkService.enable(this,false);TclPolicy.configure(this,false);return "通信維持を停止しました。";}));
   pairButton=button(root,"スマートフォンを接続（確認コードを表示）",this::pairPhone);
   root.addView(text("対応環境：TCL G06 日本向け・Magisk導入済み\n初回はMagiskのroot許可が必要です。",14,Color.rgb(180,197,208)));
-  details=text("",13,Color.rgb(154,182,194));details.setTextIsSelectable(true);details.setPadding(0,dp(20),0,dp(12));root.addView(details);
+  details=text("",15,Color.rgb(154,182,194));details.setTextIsSelectable(true);details.setPadding(0,dp(20),0,dp(12));root.addView(details);
   restore=button(root,"セットアップ前の状態に戻す",()->new AlertDialog.Builder(this).setTitle("元の状態に戻しますか？").setMessage("保存済みの設定を復元します。反映にはテレビの再起動が必要です。").setNegativeButton("戻る",null).setPositiveButton("復元",(d,w)->perform("設定を復元しています…",()->{extract();NetworkService.enable(this,false);TclPolicy.configure(this,false);return root("sh "+quote(new File(stage,"restore.sh").getAbsolutePath()),60);})).show());
   setup.requestFocus();
  }
@@ -84,7 +84,10 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(pairing!=null){pairing.close();pairing=null;}stopPhoneAdvertisement();if(pairingInfo!=null)pairingInfo.setVisibility(View.GONE);if(pairButton!=null)pairButton.setText("スマートフォンを接続（確認コードを表示）");super.onStop();}
  private TextView text(String value,int size,int color) { TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v; }
  private Button button(LinearLayout parent,String label,Runnable click) {
-  Button button=new Button(this);button.setText(label);button.setTextSize(16);button.setAllCaps(false);button.setFocusable(true);button.setMinHeight(dp(52));button.setOnClickListener(v->click.run());
+  Button button=new Button(this);button.setText(label);button.setTextSize(20);button.setAllCaps(false);button.setFocusable(true);button.setMinHeight(dp(64));button.setPadding(dp(24),0,dp(24),0);
+  button.setTextColor(Color.WHITE);button.setBackgroundColor(Color.rgb(52,58,64));
+  button.setOnFocusChangeListener((view,focus)->((Button)view).setBackgroundColor(focus?Color.rgb(35,110,200):Color.rgb(52,58,64)));
+  button.setOnClickListener(v->click.run());
   LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.setMargins(0,dp(6),0,dp(6));parent.addView(button,layout);return button;
  }
  private void busy(boolean value) { progress.setVisibility(value?View.VISIBLE:View.GONE);for(Button b:new Button[]{setup,start,reboot,refresh,restore})b.setEnabled(!value); }
