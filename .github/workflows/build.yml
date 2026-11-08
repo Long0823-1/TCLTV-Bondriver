@@ -1,0 +1,65 @@
+name: Build
+
+# Builds every deliverable of this repository with its own build scripts:
+#   - TV setup APK (native/build.ps1 + android/build.ps1, NDK r29)
+#   - Windows setup EXE (windows/build.ps1) and its channel tests
+#   - BonDriver DLLs for x86 and x64 (bondriver/build.ps1, VS C++ tools)
+# Signing keys are generated ephemerally on the runner by android/build.ps1
+# (same .local/ layout as a local build), so CI APKs are for verification
+# and cannot overwrite a release APK signed with a kept local key.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;36.0.0" "ndk;29.0.14206865"
+      - name: Build native components and APK
+        shell: pwsh
+        run: |
+          ./native/build.ps1 -NdkRoot "$env:ANDROID_HOME/ndk/29.0.14206865"
+          ./android/build.ps1 -SdkRoot "$env:ANDROID_HOME" -JdkRoot "$env:JAVA_HOME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TCLTV-Bondriver-apk
+          path: android/build/TCL-BonDriver-Setup.apk
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Windows setup and run channel tests
+        shell: pwsh
+        run: |
+          ./windows/build.ps1
+          ./windows/tests/run.ps1
+      - name: Build BonDriver DLLs (x86 and x64)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw 'Visual Studio C++ build tools were not found on this runner.' }
+          ./bondriver/build.ps1 -Architecture x64 -VsRoot $vsRoot
+          ./bondriver/build.ps1 -Architecture x86 -VsRoot $vsRoot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TCLTV-Bondriver-windows
+          path: |
+            windows/build/TCL-BonDriver-Setup.exe
+            bondriver/build/x64/BonDriver_TCLG06.dll
+            bondriver/build/x86/BonDriver_TCLG06.dll
+          if-no-files-found: error
