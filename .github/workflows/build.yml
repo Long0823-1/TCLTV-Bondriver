@@ -24,7 +24,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;36.0.0" "ndk;29.0.14206865"
       - name: Build native components and APK
