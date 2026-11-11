@@ -121,3 +121,10 @@ TVTestを閉じて新しいAPKでセットアップし、TVを再起動します
 開発・保守活動をKo-fiで支援できます。
 
 [Ko-fiで支援する](https://ko-fi.com/long0823)
+
+## 関連記事
+
+ブログ「knowledge-storage.info」で関連する解説記事を公開しています。
+
+- [TCL Android TV(32S5400）のroot化とBonDriver化への道！MT5867 大成功！！](https://knowledge-storage.info/2026/10/18/tcl-android-tv32s5400-root-bondriver/)
+- [【徹底解説】TCL TV 32S5400のroot化はなぜ難しい？USB接続・ブートループ復旧の罠と裏側](https://knowledge-storage.info/2026/10/20/tcl-tv-32s5400-root-muzukashi/)
